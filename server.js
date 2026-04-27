@@ -28,7 +28,10 @@ function adminOnly(req, res, next) {
 
 async function startServer() {
   const db = await JSONFilePreset('opinions.json', { opinions: [], ratings: [] });
-
+if (!db.data.ratings) {
+  db.data.ratings = [];
+  await db.write();
+}
   // ────────────────────────────────────────
   //  HEALTH CHECK
   // ────────────────────────────────────────
