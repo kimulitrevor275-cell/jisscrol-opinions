@@ -10,7 +10,10 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 
 app.use(express.json());
+const rateLimit = require('express-rate-limit');
 
+app.use('/opinions', rateLimit({ windowMs: 60000, max: 5 }));
+app.use('/ratings', rateLimit({ windowMs: 60000, max: 3 }));
 // ── CORS ──
 app.use(function(req, res, next) {
   res.setHeader('Access-Control-Allow-Origin', '*');
