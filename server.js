@@ -67,6 +67,7 @@ app.post('/opinions', async function(req, res) {
   if (!post_id || !text || text.trim() === '') {
     return res.status(400).json({ error: 'post_id and text are required' });
   }
+text = text.replace(/<[^>]*>/g, '').trim();
   if (text.length > 300) {
     return res.status(400).json({ error: 'Max 300 characters' });
   }
