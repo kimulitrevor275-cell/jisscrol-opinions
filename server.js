@@ -65,14 +65,14 @@ app.post('/opinions', async function(req, res) {
   if (!post_id || !text || text.trim() === '') {
     return res.status(400).json({ error: 'post_id and text are required' });
   }
-text = text.replace(/<[^>]*>/g, '').trim();
+const cleanText = text.replace(/<[^>]*>/g, '').trim();
   if (text.length > 300) {
     return res.status(400).json({ error: 'Max 300 characters' });
   }
 
   const { data, error } = await supabase
     .from('opinions')
-    .insert([{ post_id, text: text.trim() }])
+   .insert([{ post_id, text: cleanText }])
     .select();
 
   if (error) return res.status(500).json({ error: error.message });
