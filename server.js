@@ -61,7 +61,7 @@ app.get('/opinions/:post_id', async function(req, res) {
 
 // POST /opinions
 app.post('/opinions', async function(req, res) {
-  const { post_id, text } = req.body;
+  const { post_id, text,username } = req.body;
   if (!post_id || !text || text.trim() === '') {
     return res.status(400).json({ error: 'post_id and text are required' });
   }
@@ -72,7 +72,7 @@ const cleanText = text.replace(/<[^>]*>/g, '').trim();
 
   const { data, error } = await supabase
     .from('opinions')
-   .insert([{ post_id, text: cleanText }])
+   .insert([{ post_id, text: cleanText, username: username || 'Anonymous' }])
     .select();
 
   if (error) return res.status(500).json({ error: error.message });
