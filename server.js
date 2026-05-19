@@ -160,6 +160,38 @@ app.post('/ratings', async function(req, res) {
   });
 });
 
+// ── POST /visit ──
+app.post('/visit', async function(req, res) {
+  const { user_id } = req.body;
+
+  if (!user_id) {
+    return res.status(400).json({ error: 'user_id is required' });
+  }
+
+  // log the visit
+  await supabase
+    .from('visits')
+    .upsert([{ user_id, visit_date: new Date().toISOString().split('T')[0] }], {
+      onConflict: 'user_id,visit_date',
+      ignoreDuplicates: true,
+    });
+
+  const { data, error } = await supabase
+    .from('visits')
+    .select('id')
+    .eq('user_id', user_id);
+
+  
+  var count = data ? data.length : 0;
+  // calculate tier
+  var tier = null;
+  if (count >= 365) tier = 'veteran';
+  else if (count >= 30) tier = 'loyal';
+  else if (count >= 7)  tier = 'regular';
+
+  res.json({ visit_days: count, tier: tier });
+});
+
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
