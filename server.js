@@ -50,7 +50,7 @@ app.get('/', function(req, res) {
 app.get('/opinions/:post_id', async function(req, res) {
   const { data, error } = await supabase
     .from('opinions')
-    .select('id, text, time')
+    .select('id, text, time, username')
     .eq('post_id', req.params.post_id)
     .order('time', { ascending: false })
     .limit(50);
@@ -64,6 +64,8 @@ app.post('/opinions', async function(req, res) {
   const { post_id, text, username, user_id } = req.body;
   if (!post_id || !text || text.trim() === '') {
     return res.status(400).json({ error: 'post_id and text are required' });
+
+console.log('username received:', username);
   }
 const cleanText = text.replace(/<[^>]*>/g, '').trim();
   if (text.length > 300) {
