@@ -233,6 +233,26 @@ app.get('/songs', async function(req, res) {
 });
 
 
+// ── GET /tickers ──
+app.get('/tickers', async function(req, res) {
+  const { data, error } = await supabase
+    .from('tickers')
+    .select('text')
+    .eq('active', true);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// ── GET /polls ──
+app.get('/polls', async function(req, res) {
+  const { data, error } = await supabase
+    .from('polls')
+    .select('*')
+    .order('id', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
