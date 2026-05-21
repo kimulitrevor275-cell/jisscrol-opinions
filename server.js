@@ -193,6 +193,45 @@ app.post('/visit', async function(req, res) {
 
   res.json({ visit_days: count, tier: tier });
 });
+// ── GET /articles ──
+app.get('/articles', async function(req, res) {
+  var category = req.query.category;
+  var query = supabase.from('articles').select('*').order('created_at', { ascending: false });
+  if (category) query = query.eq('category', category);
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// ── GET /stories ──
+app.get('/stories', async function(req, res) {
+  const { data, error } = await supabase
+    .from('stories')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// ── GET /charts ──
+app.get('/charts', async function(req, res) {
+  const { data, error } = await supabase
+    .from('charts')
+    .select('*');
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// ── GET /songs ──
+app.get('/songs', async function(req, res) {
+  const { data, error } = await supabase
+    .from('songs')
+    .select('*')
+    .order('rank', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 
 // ── START ──
 var PORT = process.env.PORT || 3000;
