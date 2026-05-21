@@ -253,6 +253,75 @@ app.get('/polls', async function(req, res) {
   res.json(data);
 });
 
+
+
+// ── POST /admin/articles ──
+app.post('/admin/articles', adminOnly, async function(req, res) {
+  const { id, category, label, headline, img, img2, body, time, link, read_link, read_text } = req.body;
+  if (!category || !headline || !img) return res.status(400).json({ error: 'category, headline and img required' });
+  const { error } = await supabase.from('articles').insert([{ id: id || Date.now().toString(36), category, label, headline, img, img2, body, time, link, read_link, read_text }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── DELETE /admin/articles/:id ──
+app.delete('/admin/articles/:id', adminOnly, async function(req, res) {
+  const { error } = await supabase.from('articles').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── POST /admin/stories ──
+app.post('/admin/stories', adminOnly, async function(req, res) {
+  const { id, cat, badge, cc, title, snippet, body, img, author, initials, time, read_time } = req.body;
+  if (!id || !title) return res.status(400).json({ error: 'id and title required' });
+  const { error } = await supabase.from('stories').insert([{ id, cat, badge, cc, title, snippet, body, img, author, initials, time, read_time }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── POST /admin/tickers ──
+app.post('/admin/tickers', adminOnly, async function(req, res) {
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const { error } = await supabase.from('tickers').insert([{ text }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── DELETE /admin/tickers/:id ──
+app.delete('/admin/tickers/:id', adminOnly, async function(req, res) {
+  const { error } = await supabase.from('tickers').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+
+// ── PUT /admin/charts/:id ──
+app.put('/admin/charts/:id', adminOnly, async function(req, res) {
+  const { img, link } = req.body;
+  const { error } = await supabase.from('charts').update({ img, link }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── POST /admin/songs ──
+app.post('/admin/songs', adminOnly, async function(req, res) {
+  const { rank, trend, name, artist, days, img } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const { error } = await supabase.from('songs').insert([{ rank, trend, name, artist, days, img }]);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+// ── DELETE /admin/songs/:id ──
+app.delete('/admin/songs/:id', adminOnly, async function(req, res) {
+  const { error } = await supabase.from('songs').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
+
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
