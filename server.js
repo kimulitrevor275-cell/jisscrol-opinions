@@ -81,6 +81,16 @@ const cleanText = text.replace(/<[^>]*>/g, '').trim();
   res.json({ success: true, id: data[0].id });
 });
 
+// ── GET /admin/articles ──
+app.get('/admin/articles', adminOnly, async function(req, res) {
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
 // DELETE /admin/opinions/:id
 app.delete('/admin/opinions/:id', adminOnly, async function(req, res) {
   const { error } = await supabase
