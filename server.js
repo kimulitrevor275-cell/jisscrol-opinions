@@ -15,7 +15,7 @@ app.set('trust proxy', 1);
 // ── CORS ──
 app.use(function(req, res, next) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE,PUT');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-password');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
@@ -296,6 +296,13 @@ app.delete('/admin/tickers/:id', adminOnly, async function(req, res) {
   res.json({ success: true });
 });
 
+// ── PUT /admin/charts/:id ──
+app.put('/admin/charts/:id', adminOnly, async function(req, res) {
+  const { img, link } = req.body;
+  const { error } = await supabase.from('charts').update({ img, link }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
 
 // ── PUT /admin/charts/:id ──
 app.put('/admin/charts/:id', adminOnly, async function(req, res) {
