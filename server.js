@@ -339,6 +339,24 @@ app.delete('/admin/songs/:id', adminOnly, async function(req, res) {
 });
 
 
+// ── GET /search ──
+app.get('/search', async function(req, res) {
+  var q = req.query.q;
+  if (!q) return res.json([]);
+
+  const [articles, stories, songs] = await Promise.all([
+    supabase.from('articles').select('id, category, headline, img, time').ilike('headline', '%' + q + '%'),
+    supabase.from('stories').select('id, title, snippet, img, cat').ilike('title', '%' + q + '%'),
+    supabase.from('songs').select('id, name, artist, img, rank').ilike('name', '%' + q + '%')
+  ]);
+
+  res.json({
+    articles : articles.data || [],
+    stories  : stories.data  || [],
+    songs    : songs.data    || []
+  });
+});
+
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
