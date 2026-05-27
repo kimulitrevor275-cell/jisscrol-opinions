@@ -268,7 +268,7 @@ app.get('/polls', async function(req, res) {
 // ── POST /admin/articles ──
 app.post('/admin/articles', adminOnly, async function(req, res) {
   const { id, category, label, headline, img, img2, body, time, link, read_link, read_text } = req.body;
-  if (!category || !headline || !img) return res.status(400).json({ error: 'category, headline and img required' });
+  if (!category || !headline) return res.status(400).json({ error: 'category and headline  required' });
   const { error } = await supabase.from('articles').insert([{ id: id || Date.now().toString(36), category, label, headline, img, img2, body, time, link, read_link, read_text }]);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
