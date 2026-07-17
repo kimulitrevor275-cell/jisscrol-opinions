@@ -80,15 +80,16 @@ const cleanText = text.replace(/<[^>]*>/g, '').trim();
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true, id: data[0].id });
 });
+app.post('/admin/articles', adminOnly, async function(req, res) {
+  const { id, category, label, headline, img, img2, body, time, link, read_link, read_text } = req.body;
+  if (!category || !headline) return res.status(400).json({ error: 'category and headline required' });
 
-// ── GET /admin/articles ──
-app.get('/admin/articles', adminOnly, async function(req, res) {
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('articles')
-    .select('*')
-    .order('created_at', { ascending: false });
+    .insert([{ id, category, label, headline, img, img2, body, time, link, read_link, read_text }]);
+
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  res.json({ success: true });
 });
 
 // DELETE /admin/opinions/:id
