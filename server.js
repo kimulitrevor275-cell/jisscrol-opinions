@@ -64,32 +64,32 @@ app.post('/opinions', async function(req, res) {
   const { post_id, text, username, user_id } = req.body;
   if (!post_id || !text || text.trim() === '') {
     return res.status(400).json({ error: 'post_id and text are required' });
-
-console.log('username received:', username);
   }
-const cleanText = text.replace(/<[^>]*>/g, '').trim();
+
+  console.log('username received:', username);
+
+  const cleanText = text.replace(/<[^>]*>/g, '').trim();
   if (text.length > 300) {
     return res.status(400).json({ error: 'Max 300 characters' });
   }
 
   const { data, error } = await supabase
     .from('opinions')
-   .insert([{ post_id, text: cleanText, username: username || 'Anonymous', user_id: user_id || null }])
+    .insert([{ post_id, text: cleanText, username: username || 'Anonymous', user_id: user_id || null }])
     .select();
 
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true, id: data[0].id });
 });
-app.post('/admin/articles', adminOnly, async function(req, res) {
-  const { id, category, label, headline, img, img2, body, time, link, read_link, read_text } = req.body;
-  if (!category || !headline) return res.status(400).json({ error: 'category and headline required' });
 
-  const { error } = await supabase
+// ── GET /admin/articles ──
+app.get('/admin/articles', adminOnly, async function(req, res) {
+  const { data, error } = await supabase
     .from('articles')
-    .insert([{ id, category, label, headline, img, img2, body, time, link, read_link, read_text }]);
-
+    .select('*')
+    .order('created_at', { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ success: true });
+  res.json(data);
 });
 
 // DELETE /admin/opinions/:id
@@ -194,7 +194,6 @@ app.post('/visit', async function(req, res) {
     .select('id')
     .eq('user_id', user_id);
 
-  
   var count = data ? data.length : 0;
   // calculate tier
   var tier = null;
@@ -204,6 +203,7 @@ app.post('/visit', async function(req, res) {
 
   res.json({ visit_days: count, tier: tier });
 });
+
 // ── GET /articles ──
 app.get('/articles', async function(req, res) {
   var category = req.query.category;
@@ -243,7 +243,6 @@ app.get('/songs', async function(req, res) {
   res.json(data);
 });
 
-
 // ── GET /tickers ──
 app.get('/tickers', async function(req, res) {
   const { data, error } = await supabase
@@ -264,12 +263,18 @@ app.get('/polls', async function(req, res) {
   res.json(data);
 });
 
-
-
 // ── POST /admin/articles ──
 app.post('/admin/articles', adminOnly, async function(req, res) {
   const { id, category, label, headline, img, img2, body, time, link, read_link, read_text } = req.body;
-if (!category || !headline) return res.status(400).json({ error: 'category and headline required' });
+  if (!category || !headline) return res.status(400).json({ error: 'category and headline required' });
+
+  const { error } = await supabase
+    .from('articles')
+    .insert([{ id, category, label, headline, img, img2, body, time, link, read_link, read_text }]);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
 
 // ── DELETE /admin/articles/:id ──
 app.delete('/admin/articles/:id', adminOnly, async function(req, res) {
@@ -311,14 +316,6 @@ app.put('/admin/charts/:id', adminOnly, async function(req, res) {
   res.json({ success: true });
 });
 
-// ── PUT /admin/charts/:id ──
-app.put('/admin/charts/:id', adminOnly, async function(req, res) {
-  const { img, link } = req.body;
-  const { error } = await supabase.from('charts').update({ img, link }).eq('id', req.params.id);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json({ success: true });
-});
-
 // ── POST /admin/songs ──
 app.post('/admin/songs', adminOnly, async function(req, res) {
   const { rank, trend, name, artist, days, img } = req.body;
@@ -334,7 +331,6 @@ app.delete('/admin/songs/:id', adminOnly, async function(req, res) {
   if (error) return res.status(500).json({ error: error.message });
   res.json({ success: true });
 });
-
 
 // ── GET /search ──
 app.get('/search', async function(req, res) {
@@ -359,4 +355,5 @@ var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
   console.log('JisScroL API running on port ' + PORT);
 });
+
 
