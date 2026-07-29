@@ -263,6 +263,24 @@ app.get('/polls', async function(req, res) {
   res.json(data);
 });
 
+// ── PUT /admin/polls/:id ──
+app.put('/admin/polls/:id', adminOnly, async function(req, res) {
+  const { id } = req.params;
+  const { img, text } = req.body;
+
+  const updates = {};
+  if (img  !== undefined) updates.img  = img;
+  if (text !== undefined) updates.text = text;
+
+  const { error } = await supabase
+    .from('polls')
+    .update(updates)
+    .eq('id', id);
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ success: true });
+});
+
 // ── POST /admin/articles ──
 app.post('/admin/articles', adminOnly, async function(req, res) {
   const { id, category, label, headline, img, img2, body, time, link, read_link, read_text } = req.body;
