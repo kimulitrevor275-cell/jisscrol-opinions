@@ -21,6 +21,42 @@ app.use(function(req, res, next) {
   next();
 });
 
+app.use(express.json());
+app.set('trust proxy', 1);
+
+// ── CORS ──
+app.use(function(req, res, next) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
+// ── RATE LIMITING ──  ← ADD THIS
+const rateLimit = require('express-rate-limit');
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,  // 15 minutes
+    max: 100  // limit each IP to 100 requests per windowMs
+});
+
+app.use(limiter);
+
+// ── API KEY ──  ← ADD THIS
+const API_KEY = process.env.API_KEY || "jisscrol-default-key";
+
+function checkApiKey(req, res, next) {
+  const key = req.headers['authorization'];
+  
+  if (key !== `Bearer ${API_KEY}`) {
+    return res.status(401).json({ error: "Unauthorized - Invalid API key" });
+  }
+  
+  next();
+}
+
+
 // ── SUPABASE ──
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -205,7 +241,7 @@ app.post('/visit', async function(req, res) {
 });
 
 // ── GET /articles ──
-app.get('/articles', async function(req, res) {
+app.get('/articles',checkApiKey, async function(req, res) {
   var category = req.query.category;
   var query = supabase.from('articles').select('*').order('created_at', { ascending: false });
   if (category) query = query.eq('category', category);
