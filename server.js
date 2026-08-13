@@ -206,12 +206,67 @@ app.post('/visit', async function(req, res) {
 
 // ── GET /articles ──
 app.get('/articles', async function(req, res) {
-  var category = req.query.category;
-  var query = supabase.from('articles').select('*').order('created_at', { ascending: false });
-  if (category) query = query.eq('category', category);
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+    var category = req.query.category;
+    
+    let query = supabase
+        .from('articles')
+        .select('*');
+    
+    if (category) query = query.eq('category', category);
+    
+    const { data: articles, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+    
+    // Score each article with engagement
+    const scoredArticles = await Promise.all(
+        articles.map(async (article) => {
+            // Fetch opinions (comments)
+            const { data: opinions } = await supabase
+                .from('opinions')
+                .select('id')
+                .eq('post_id', article.id);
+            
+            // Fetch ratings
+            const { data: ratings } = await supabase
+                .from('ratings')
+                .select('vote')
+                .eq('post_id', article.id);
+            
+            // Count engagement
+            const commentCount = opinions?.length || 0;
+            const goodVotes = ratings?.filter(r => r.vote === 'good').length || 0;
+            const badVotes = ratings?.filter(r => r.vote === 'bad').length || 0;
+            
+            // Recency decay
+            const now = Date.now();
+            const createdAt = new Date(article.created_at).getTime();
+            const daysSincePost = (now - createdAt) / (1000 * 60 * 60 * 24);
+            const recencyScore = Math.max(0, 1 / (1 + daysSincePost / 7));
+            
+            // Engagement score
+            const engagementScore = 
+                (goodVotes * 2) + 
+                (commentCount * 3) + 
+                (Math.max(0, goodVotes - badVotes));
+            
+            const finalScore = engagementScore + (recencyScore * 10);
+            
+            return {
+                ...article,
+                _score: finalScore,
+                _engagement: { commentCount, goodVotes, badVotes, daysSincePost }
+            };
+        })
+    );
+    
+    // Sort by score
+    const sorted = scoredArticles
+        .sort((a, b) => b._score - a._score)
+        .map(({ _engagement, ...article }) => article); // Remove engagement data before sending
+    
+    console.log('Articles ranked:', sorted.map(a => ({ id: a.id, score: a._score })));
+    
+    res.json(sorted);
 });
 
 // ── GET /stories ──
