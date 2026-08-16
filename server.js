@@ -59,27 +59,47 @@ app.get('/opinions/:post_id', async function(req, res) {
   res.json(data);
 });
 
-// POST /opinions
+// POST /opinion
 app.post('/opinions', async function(req, res) {
   const { post_id, text, username, user_id } = req.body;
+  
   if (!post_id || !text || text.trim() === '') {
-    return res.status(400).json({ error: 'post_id and text are required' });
+    return res.status(400).json({ error: 'post_id and text required' });
   }
 
-  console.log('username received:', username);
+  let tier = null;
+  
+  // Calculate tier if user_id exists
+  if (user_id) {
+    const { data: visitData } = await supabase
+      .from('visits')
+      .select('id')
+      .eq('user_id', user_id);
+
+    const count = visitData ? visitData.length : 0;
+    if (count >= 365) tier = 'veteran';
+    else if (count >= 30) tier = 'loyal';
+    else if (count >= 7) tier = 'regular';
+  }
 
   const cleanText = text.replace(/<[^>]*>/g, '').trim();
-  if (text.length > 300) {
-    return res.status(400).json({ error: 'Max 300 characters' });
+  if (cleanText.length > 300) {
+    return res.status(400).json({ error: 'Max 300 chars' });
   }
 
   const { data, error } = await supabase
     .from('opinions')
-    .insert([{ post_id, text: cleanText, username: username || 'Anonymous', user_id: user_id || null }])
+    .insert([{ 
+      post_id, 
+      text: cleanText, 
+      username,
+      user_id,
+      tier  // ← Add tier to insert
+    }])
     .select();
 
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ success: true, id: data[0].id });
+  res.json({ success: true, id: data[0].id, tier });
 });
 
 // ── GET /admin/articles ──
