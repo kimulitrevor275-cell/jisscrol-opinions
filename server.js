@@ -204,7 +204,6 @@ app.post('/visit', async function(req, res) {
   res.json({ visit_days: count, tier: tier });
 });
 
-// ── GET /articles ──
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
     
@@ -227,7 +226,7 @@ app.get('/articles', async function(req, res) {
         
         // Add random noise (±10% of total score)
         const baseScore = recencyScore + engagementBonus;
-        const randomFactor = (Math.random() - 0.9) * 0.2; // ±10%
+        const randomFactor = (Math.random() - 0.5) * 0.2; // ±10%
         const finalScore = baseScore * (1 + randomFactor);
         
         return { ...article, _score: finalScore };
