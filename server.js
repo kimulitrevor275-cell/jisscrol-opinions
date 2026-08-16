@@ -50,7 +50,7 @@ app.get('/', function(req, res) {
 app.get('/opinions/:post_id', async function(req, res) {
   const { data, error } = await supabase
     .from('opinions')
-    .select('id, text, time, username, user_id')
+    .select('id, text, time, username, user_id, tier')
     .eq('post_id', req.params.post_id)
     .order('time', { ascending: false })
     .limit(50);
