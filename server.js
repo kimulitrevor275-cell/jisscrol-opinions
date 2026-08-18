@@ -144,7 +144,7 @@ app.get('/ratings/:post_id', async function(req, res) {
     .from('ratings')
     .select('vote')
     .eq('post_id', req.params.post_id);
-
+    .limit(1000000);
   if (error) return res.status(500).json({ error: error.message });
 
   var good  = data.filter(function(r) { return r.vote === 'good'; }).length;
@@ -178,7 +178,7 @@ app.post('/ratings', async function(req, res) {
     .from('ratings')
     .select('vote')
     .eq('post_id', post_id);
-
+    .limit(1000000);
   var good  = data.filter(function(r) { return r.vote === 'good'; }).length;
   var bad   = data.filter(function(r) { return r.vote === 'bad';  }).length;
   var total = good + bad;
