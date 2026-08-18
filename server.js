@@ -143,7 +143,8 @@ app.get('/ratings/:post_id', async function(req, res) {
   const { data, error } = await supabase
     .from('ratings')
     .select('vote')
-    .eq('post_id', req.params.post_id);
+    .eq('post_id', req.params.post_id)
+    .limit(1000000);
 
   if (error) return res.status(500).json({ error: error.message });
 
@@ -177,7 +178,8 @@ app.post('/ratings', async function(req, res) {
   const { data } = await supabase
     .from('ratings')
     .select('vote')
-    .eq('post_id', post_id);
+    .eq('post_id', post_id)
+    .limit(1000000);
 
   var good  = data.filter(function(r) { return r.vote === 'good'; }).length;
   var bad   = data.filter(function(r) { return r.vote === 'bad';  }).length;
