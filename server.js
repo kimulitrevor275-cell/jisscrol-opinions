@@ -210,6 +210,7 @@ app.post('/ratings', async function(req, res) {
     goodPct: total ? Math.round((good / total) * 100) : 50,
     badPct: total ? Math.round((bad / total) * 100) : 50
   });
+});
 // ── POST /visit ──
 app.post('/visit', async function(req, res) {
   const { user_id } = req.body;
