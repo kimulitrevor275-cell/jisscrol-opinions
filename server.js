@@ -164,37 +164,52 @@ app.get('/ratings/:post_id', async function(req, res) {
 // POST /ratings
 app.post('/ratings', async function(req, res) {
   const { post_id, vote } = req.body;
+  
+  console.log(`[RATING] Incoming: post_id=${post_id}, vote=${vote}`);
+  
   if (!post_id || (vote !== 'good' && vote !== 'bad')) {
-    return res.status(400).json({ error: 'post_id and vote (good/bad) are required' });
+    console.log('[RATING] Invalid input rejected');
+    return res.status(400).json({ error: 'Invalid' });
   }
 
-  const { error } = await supabase
+  // Check current count BEFORE insert
+  const { data: before } = await supabase
+    .from('ratings')
+    .select('vote')
+    .eq('post_id', post_id)
+    .limit(1000000);
+  
+  console.log(`[RATING] Current count before insert: ${before?.length}`);
+
+  const { data, error } = await supabase
     .from('ratings')
     .insert([{ post_id, vote }]);
 
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) {
+    console.log(`[RATING] INSERT ERROR: ${JSON.stringify(error)}`);
+    return res.status(500).json({ error: error.message });
+  }
 
-  // return updated counts
-  const { data } = await supabase
+  console.log(`[RATING] Insert success`);
+
+  // Check count AFTER insert
+  const { data: after } = await supabase
     .from('ratings')
     .select('vote')
     .eq('post_id', post_id)
     .limit(1000000);
 
-  var good  = data.filter(function(r) { return r.vote === 'good'; }).length;
-  var bad   = data.filter(function(r) { return r.vote === 'bad';  }).length;
-  var total = good + bad;
+  console.log(`[RATING] Count after insert: ${after?.length}`);
+
+  const good = after.filter(r => r.vote === 'good').length;
+  const bad = after.filter(r => r.vote === 'bad').length;
+  const total = good + bad;
 
   res.json({
-    success : true,
-    good    : good,
-    bad     : bad,
-    total   : total,
-    goodPct : Math.round((good / total) * 100),
-    badPct  : Math.round((bad  / total) * 100),
+    good, bad, total,
+    goodPct: total ? Math.round((good / total) * 100) : 50,
+    badPct: total ? Math.round((bad / total) * 100) : 50
   });
-});
-
 // ── POST /visit ──
 app.post('/visit', async function(req, res) {
   const { user_id } = req.body;
