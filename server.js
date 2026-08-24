@@ -140,75 +140,65 @@ app.get('/admin/opinions', adminOnly, async function(req, res) {
 
 // GET /ratings/:post_id
 app.get('/ratings/:post_id', async function(req, res) {
-  const { data, error } = await supabase
+  const post_id = req.params.post_id;
+
+  const { count: good } = await supabase
     .from('ratings')
-    .select('vote')
-    .eq('post_id', req.params.post_id)
-    .limit(1000000);
+    .select('*', { count: 'exact', head: true })
+    .eq('post_id', post_id)
+    .eq('vote', 'good');
 
-  if (error) return res.status(500).json({ error: error.message });
+  const { count: bad } = await supabase
+    .from('ratings')
+    .select('*', { count: 'exact', head: true })
+    .eq('post_id', post_id)
+    .eq('vote', 'bad');
 
-  var good  = data.filter(function(r) { return r.vote === 'good'; }).length;
-  var bad   = data.filter(function(r) { return r.vote === 'bad';  }).length;
-  var total = good + bad;
+  const total = (good || 0) + (bad || 0);
 
   res.json({
-    good    : good,
-    bad     : bad,
-    total   : total,
-    goodPct : total ? Math.round((good / total) * 100) : 50,
-    badPct  : total ? Math.round((bad  / total) * 100) : 50,
+    good: good || 0,
+    bad: bad || 0,
+    total: total,
+    goodPct: total ? Math.round(((good || 0) / total) * 100) : 50,
+    badPct: total ? Math.round(((bad || 0) / total) * 100) : 50
   });
 });
 
 // POST /ratings
 app.post('/ratings', async function(req, res) {
   const { post_id, vote } = req.body;
-  
-  console.log(`[RATING] Incoming: post_id=${post_id}, vote=${vote}`);
-  
+
   if (!post_id || (vote !== 'good' && vote !== 'bad')) {
-    console.log('[RATING] Invalid input rejected');
     return res.status(400).json({ error: 'Invalid' });
   }
 
-  // Check current count BEFORE insert
-  const { data: before } = await supabase
-    .from('ratings')
-    .select('vote')
-    .eq('post_id', post_id)
-    .limit(1000000);
-  
-  console.log(`[RATING] Current count before insert: ${before?.length}`);
-
-  const { data, error } = await supabase
+  const { error } = await supabase
     .from('ratings')
     .insert([{ post_id, vote }]);
 
-  if (error) {
-    console.log(`[RATING] INSERT ERROR: ${JSON.stringify(error)}`);
-    return res.status(500).json({ error: error.message });
-  }
+  if (error) return res.status(500).json({ error: error.message });
 
-  console.log(`[RATING] Insert success`);
-
-  // Check count AFTER insert
-  const { data: after } = await supabase
+  const { count: good } = await supabase
     .from('ratings')
-    .select('vote')
+    .select('*', { count: 'exact', head: true })
     .eq('post_id', post_id)
-    .limit(1000000);
+    .eq('vote', 'good');
 
-  console.log(`[RATING] Count after insert: ${after?.length}`);
+  const { count: bad } = await supabase
+    .from('ratings')
+    .select('*', { count: 'exact', head: true })
+    .eq('post_id', post_id)
+    .eq('vote', 'bad');
 
-  const good = after.filter(r => r.vote === 'good').length;
-  const bad = after.filter(r => r.vote === 'bad').length;
-  const total = good + bad;
+  const total = (good || 0) + (bad || 0);
 
   res.json({
-    good, bad, total,
-    goodPct: total ? Math.round((good / total) * 100) : 50,
-    badPct: total ? Math.round((bad / total) * 100) : 50
+    good: good || 0,
+    bad: bad || 0,
+    total: total,
+    goodPct: total ? Math.round(((good || 0) / total) * 100) : 50,
+    badPct: total ? Math.round(((bad || 0) / total) * 100) : 50
   });
 });
 // ── POST /visit ──
