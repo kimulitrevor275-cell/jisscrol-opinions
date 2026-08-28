@@ -196,9 +196,7 @@ app.post('/ratings', async function(req, res) {
   res.json({
     good: good || 0,
     bad: bad || 0,
-    total: total,
-    goodPct: total ? Math.round(((good || 0) / total) * 100) : 50,
-    badPct: total ? Math.round(((bad || 0) / total) * 100) : 50
+    total: total
   });
 });
 // ── POST /visit ──
