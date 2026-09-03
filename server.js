@@ -232,32 +232,49 @@ app.post('/visit', async function(req, res) {
 
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
-    
-    let query = supabase
-        .from('articles')
-        .select('*');
-    
-    if (category) query = query.eq('category', category);
-    
+
+    // TRENDS — all categories, engagement scored, shuffled
+    if (category === 'newpage') {
+        const { data: all, error: allError } = await supabase
+            .from('articles')
+            .select('*')
+            .in('category', ['newpage', 'trends']);
+
+        if (allError) return res.status(500).json({ error: allError.message });
+
+        const scored = all.map(article => {
+            const engagementScore =
+                (article.comment_count || 0) * 3 +
+                (article.like_count || 0) * 2;
+            const randomFactor = (Math.random() - 0.5) * 0.4;
+            return { ...article, _score: engagementScore * (1 + randomFactor) };
+        });
+
+        return res.json(scored.sort((a, b) => b._score - a._score));
+    }
+
+    // HOME — all categories, recency scored
+    let query = supabase.from('articles').select('*');
+    if (category && category !== 'home') query = query.eq('category', category);
+
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
-    
+
     const scored = data.map(article => {
         const now = Date.now();
         const created = new Date(article.created_at).getTime();
         const daysSincePost = (now - created) / (1000 * 60 * 60 * 24);
-        
+
         const recencyScore = 100 * Math.exp(-daysSincePost / 7);
         const engagementBonus = (article.comment_count || 0) * 2 + (article.like_count || 0) * 1.5;
-        
-        // Add random noise (±10% of total score)
+
         const baseScore = recencyScore + engagementBonus;
-        const randomFactor = (Math.random() - 0.5) * 0.2; // ±10%
+        const randomFactor = (Math.random() - 0.5) * 0.2;
         const finalScore = baseScore * (1 + randomFactor);
-        
+
         return { ...article, _score: finalScore };
     });
-    
+
     return res.json(scored.sort((a, b) => b._score - a._score));
 });
 // ── GET /stories ──
