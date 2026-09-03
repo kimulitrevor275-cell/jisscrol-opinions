@@ -255,7 +255,7 @@ app.get('/articles', async function(req, res) {
 
     // HOME — all categories, recency scored
     let query = supabase.from('articles').select('*');
-    if (category && category !== 'home') query = query.eq('category', category);
+    if (category && category !== 'trends') query = query.eq('category', category);
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
