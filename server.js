@@ -301,7 +301,17 @@ app.get('/articles', async function(req, res) {
         const engagementBonus =
             (article.comment_count || 0) * 2 +
             (article.like_count || 0) * 1.5;
-// ── GET /stories ──
+
+        const baseScore = recencyScore + engagementBonus;
+        const randomFactor = (Math.random() - 0.5) * 0.2;
+
+        return { ...article, _score: baseScore * (1 + randomFactor) };
+    });
+
+    return res.json(scored.sort((a, b) => b._score - a._score));
+}); 
+
+
 app.get('/stories', async function(req, res) {
   const { data, error } = await supabase
     .from('stories')
