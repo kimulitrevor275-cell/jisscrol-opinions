@@ -233,16 +233,16 @@ app.post('/visit', async function(req, res) {
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
 
-    // TRENDS — all categories, engagement scored, shuffled
+    // TRENDS SCREEN — newpage category, engagement scored + shuffled
     if (category === 'newpage') {
-        const { data: all, error: allError } = await supabase
+        const { data, error } = await supabase
             .from('articles')
             .select('*')
-            .in('category', ['newpage', 'trends']);
+            .eq('category', 'newpage');
 
-        if (allError) return res.status(500).json({ error: allError.message });
+        if (error) return res.status(500).json({ error: error.message });
 
-        const scored = all.map(article => {
+        const scored = data.map(article => {
             const engagementScore =
                 (article.comment_count || 0) * 3 +
                 (article.like_count || 0) * 2;
@@ -253,11 +253,46 @@ app.get('/articles', async function(req, res) {
         return res.json(scored.sort((a, b) => b._score - a._score));
     }
 
-    // HOME — all categories, recency scored
-    let query = supabase.from('articles').select('*');
-    if (category && category !== 'trends') query = query.eq('category', category);
+    // HOME SCREEN — trends category, new + engaging at top
+    if (category === 'trends') {
+        const { data, error } = await supabase
+            .from('articles')
+            .select('*')
+            .eq('category', 'trends');
 
-    const { data, error } = await query;
+        if (error) return res.status(500).json({ error: error.message });
+
+        const scored = data.map(article => {
+            const now = Date.now();
+            const created = new Date(article.created_at).getTime();
+            const daysSincePost = (now - created) / (1000 * 60 * 60 * 24);
+
+            // Recency — new posts score high, fades over 7 days
+            const recencyScore = 100 * Math.exp(-daysSincePost / 7);
+
+            // Engagement boost
+            const engagementBonus =
+                (article.comment_count || 0) * 2 +
+                (article.like_count || 0) * 1.5;
+
+            // Extra boost for newpage articles appearing on home
+            const categoryBonus = article.category === 'newpage' ? 20 : 0;
+
+            const baseScore = recencyScore + engagementBonus + categoryBonus;
+            const randomFactor = (Math.random() - 0.5) * 0.2;
+
+            return { ...article, _score: baseScore * (1 + randomFactor) };
+        });
+
+        return res.json(scored.sort((a, b) => b._score - a._score));
+    }
+
+    // SPORTS SCREEN — sports category, recency scored
+    const { data, error } = await supabase
+        .from('articles')
+        .select('*')
+        .eq('category', category);
+
     if (error) return res.status(500).json({ error: error.message });
 
     const scored = data.map(article => {
@@ -266,13 +301,14 @@ app.get('/articles', async function(req, res) {
         const daysSincePost = (now - created) / (1000 * 60 * 60 * 24);
 
         const recencyScore = 100 * Math.exp(-daysSincePost / 7);
-        const engagementBonus = (article.comment_count || 0) * 2 + (article.like_count || 0) * 1.5;
+        const engagementBonus =
+            (article.comment_count || 0) * 2 +
+            (article.like_count || 0) * 1.5;
 
         const baseScore = recencyScore + engagementBonus;
         const randomFactor = (Math.random() - 0.5) * 0.2;
-        const finalScore = baseScore * (1 + randomFactor);
 
-        return { ...article, _score: finalScore };
+        return { ...article, _score: baseScore * (1 + randomFactor) };
     });
 
     return res.json(scored.sort((a, b) => b._score - a._score));
