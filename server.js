@@ -233,32 +233,11 @@ app.post('/visit', async function(req, res) {
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
 
-    // TRENDS SCREEN — newpage category, engagement scored + shuffled
-    if (category === 'newpage') {
-        const { data, error } = await supabase
-            .from('articles')
-            .select('*')
-            .eq('category', 'newpage');
-
-        if (error) return res.status(500).json({ error: error.message });
-
-        const scored = data.map(article => {
-            const engagementScore =
-                (article.comment_count || 0) * 3 +
-                (article.like_count || 0) * 2;
-            const randomFactor = (Math.random() - 0.5) * 0.4;
-            return { ...article, _score: engagementScore * (1 + randomFactor) };
-        });
-
-        return res.json(scored.sort((a, b) => b._score - a._score));
-    }
-
-    // HOME SCREEN — trends category, new + engaging at top
+    // HOME — all categories, recency first
     if (category === 'trends') {
         const { data, error } = await supabase
             .from('articles')
-            .select('*')
-            .eq('category', 'trends');
+            .select('*');
 
         if (error) return res.status(500).json({ error: error.message });
 
@@ -267,18 +246,12 @@ app.get('/articles', async function(req, res) {
             const created = new Date(article.created_at).getTime();
             const daysSincePost = (now - created) / (1000 * 60 * 60 * 24);
 
-            // Recency — new posts score high, fades over 7 days
             const recencyScore = 100 * Math.exp(-daysSincePost / 7);
-
-            // Engagement boost
             const engagementBonus =
                 (article.comment_count || 0) * 2 +
                 (article.like_count || 0) * 1.5;
 
-            // Extra boost for newpage articles appearing on home
-            const categoryBonus = article.category === 'newpage' ? 20 : 0;
-
-            const baseScore = recencyScore + engagementBonus + categoryBonus;
+            const baseScore = recencyScore + engagementBonus;
             const randomFactor = (Math.random() - 0.5) * 0.2;
 
             return { ...article, _score: baseScore * (1 + randomFactor) };
@@ -287,7 +260,31 @@ app.get('/articles', async function(req, res) {
         return res.json(scored.sort((a, b) => b._score - a._score));
     }
 
-    // SPORTS SCREEN — sports category, recency scored
+    // TRENDS — newpage focused, others mixed in, engagement scored
+    if (category === 'newpage') {
+        const { data, error } = await supabase
+            .from('articles')
+            .select('*');
+
+        if (error) return res.status(500).json({ error: error.message });
+
+        const scored = data.map(article => {
+            const engagementScore =
+                (article.comment_count || 0) * 3 +
+                (article.like_count || 0) * 2;
+
+            // newpage articles get priority boost
+            const categoryBonus = article.category === 'newpage' ? 50 : 0;
+
+            const randomFactor = (Math.random() - 0.5) * 0.4;
+
+            return { ...article, _score: (engagementScore + categoryBonus) * (1 + randomFactor) };
+        });
+
+        return res.json(scored.sort((a, b) => b._score - a._score));
+    }
+
+    // SPORTS — sports only, recency scored
     const { data, error } = await supabase
         .from('articles')
         .select('*')
@@ -304,15 +301,6 @@ app.get('/articles', async function(req, res) {
         const engagementBonus =
             (article.comment_count || 0) * 2 +
             (article.like_count || 0) * 1.5;
-
-        const baseScore = recencyScore + engagementBonus;
-        const randomFactor = (Math.random() - 0.5) * 0.2;
-
-        return { ...article, _score: baseScore * (1 + randomFactor) };
-    });
-
-    return res.json(scored.sort((a, b) => b._score - a._score));
-});
 // ── GET /stories ──
 app.get('/stories', async function(req, res) {
   const { data, error } = await supabase
