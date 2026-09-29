@@ -466,14 +466,14 @@ app.get('/search', async function(req, res) {
 });
 
 const NodeCache = require('node-cache');
-const cache = new NodeCache({ stdTTL: 3600 }); // 1 hour
+const cache = new NodeCache({ stdTTL: 3600 });
 
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY;
 const COMPETITIONS = ['PL', 'LA', 'BL1', 'SA', 'FL1'];
 
-// Fetch and cache on server start + every hour
 async function fetchFootballData() {
   try {
+    // Fetch matches
     const matches = await Promise.all(
       COMPETITIONS.map(comp =>
         fetch(`https://api.football-data.org/v4/competitions/${comp}/matches?status=SCHEDULED`, {
@@ -483,22 +483,34 @@ async function fetchFootballData() {
     );
     const allMatches = matches.flatMap(m => m.matches || []);
     cache.set('football_matches', allMatches);
-    console.log(`Cached ${allMatches.length} matches`);
+
+    // Fetch standings
+    const standings = await Promise.all(
+      COMPETITIONS.map(comp =>
+        fetch(`https://api.football-data.org/v4/competitions/${comp}/standings`, {
+          headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
+        }).then(r => r.json())
+      )
+    );
+    cache.set('football_standings', standings);
+    
+    console.log(`Cached ${allMatches.length} matches & standings`);
   } catch (e) {
     console.error('Football API error:', e.message);
   }
 }
 
-// Fetch on startup
 fetchFootballData();
-
-// Refresh every hour
 setInterval(fetchFootballData, 3600000);
 
-// Endpoint
 app.get("/footstat", (req, res) => {
   const matches = cache.get('football_matches') || [];
   res.json({ matches, cached: true, count: matches.length });
+});
+
+app.get("/standings", (req, res) => {
+  const standings = cache.get('football_standings') || [];
+  res.json({ standings });
 });
 
 
