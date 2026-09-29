@@ -465,6 +465,45 @@ app.get('/search', async function(req, res) {
   });
 });
 
+const NodeCache = require('node-cache');
+const cache = new NodeCache({ stdTTL: 3600 }); // 1 hour
+
+const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY;
+const COMPETITIONS = ['PL', 'LA', 'BL1', 'SA', 'FL1'];
+
+// Fetch and cache on server start + every hour
+async function fetchFootballData() {
+  try {
+    const matches = await Promise.all(
+      COMPETITIONS.map(comp =>
+        fetch(`https://api.football-data.org/v4/competitions/${comp}/matches?status=SCHEDULED`, {
+          headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
+        }).then(r => r.json())
+      )
+    );
+    const allMatches = matches.flatMap(m => m.matches || []);
+    cache.set('football_matches', allMatches);
+    console.log(`Cached ${allMatches.length} matches`);
+  } catch (e) {
+    console.error('Football API error:', e.message);
+  }
+}
+
+// Fetch on startup
+fetchFootballData();
+
+// Refresh every hour
+setInterval(fetchFootballData, 3600000);
+
+// Endpoint
+app.get("/footstat", (req, res) => {
+  const matches = cache.get('football_matches') || [];
+  res.json({ matches, cached: true, count: matches.length });
+});
+
+
+
+
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
