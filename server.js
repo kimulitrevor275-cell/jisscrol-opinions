@@ -230,6 +230,31 @@ app.post('/visit', async function(req, res) {
   res.json({ visit_days: count, tier: tier });
 });
 
+// ─────────────────────────────────────────
+//  MEDIA TYPE DETECTION
+// ─────────────────────────────────────────
+// Looks at a stored img/img2 URL and labels what it actually is, so
+// the frontend never has to sniff file extensions itself — it just
+// switches on img_type / img2_type.
+
+function detectMediaType(url) {
+    if (!url) return null;
+
+    if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(url)) return 'video';
+    if (/youtube\.com|youtu\.be|vimeo\.com/i.test(url)) return 'embed';
+    if (/\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i.test(url)) return 'img';
+
+    return 'img'; // fallback — matches current default behavior
+}
+
+function withMediaTypes(article) {
+    return {
+        ...article,
+        img_type: detectMediaType(article.img),
+        img2_type: detectMediaType(article.img2),
+    };
+}
+
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
 
@@ -257,7 +282,7 @@ app.get('/articles', async function(req, res) {
             return { ...article, _score: baseScore * (1 + randomFactor) };
         });
 
-        return res.json(scored.sort((a, b) => b._score - a._score));
+        return res.json(scored.sort((a, b) => b._score - a._score).map(withMediaTypes));
     }
 
     // TRENDS — newpage focused, others mixed in, engagement scored
@@ -281,7 +306,7 @@ app.get('/articles', async function(req, res) {
             return { ...article, _score: (engagementScore + categoryBonus) * (1 + randomFactor) };
         });
 
-        return res.json(scored.sort((a, b) => b._score - a._score));
+        return res.json(scored.sort((a, b) => b._score - a._score).map(withMediaTypes));
     }
 
     // SPORTS — sports only, recency scored
@@ -308,8 +333,8 @@ app.get('/articles', async function(req, res) {
         return { ...article, _score: baseScore * (1 + randomFactor) };
     });
 
-    return res.json(scored.sort((a, b) => b._score - a._score));
-}); 
+    return res.json(scored.sort((a, b) => b._score - a._score).map(withMediaTypes));
+});
 
 
 app.get('/stories', async function(req, res) {
