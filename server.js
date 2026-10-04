@@ -233,30 +233,152 @@ app.post('/visit', async function(req, res) {
 // ─────────────────────────────────────────
 //  MEDIA TYPE DETECTION
 // ─────────────────────────────────────────
-// Looks at a stored img/img2 URL and labels what it actually is, so
-// the frontend never has to sniff file extensions itself — it just
-// switches on img_type / img2_type.
+// Classifies a stored img/img2 URL so clients (web + Android) never have
+// to sniff URLs themselves.
+//
+// classifyMedia() returns:
+//   { type: 'image' | 'video' | 'embed', url, provider, embedUrl }
+// - provider / embedUrl are only set for type 'embed'
+// - clients add their own autoplay/mute params (and Twitch's `parent`)
+//
+// withMediaTypes() adds:
+//   media[]               → new normalized shape (Android + updated web)
+//   img_type / img2_type  → legacy vocabulary ('img' | 'video' | 'embed')
+//                           so the old web frontend keeps working
 
-function detectMediaType(url) {
-    if (!url) return null;
+const VIDEO_EXT = /\.(mp4|m4v|webm|ogv|ogg|mov|3gp|m3u8|mpd)$/i;
 
-    if (/\.(mp4|webm|ogg)(\?.*)?$/i.test(url)) return 'video';
-    if (/youtube\.com|youtu\.be|vimeo\.com/i.test(url)) return 'embed';
-    if (/\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i.test(url)) return 'img';
+function toEmbed(url) {
+  const host = url.hostname.toLowerCase().replace(/^www\.|^m\./, '');
+  const seg = url.pathname.split('/').filter(Boolean);
+  let m;
 
-    return 'img'; // fallback — matches current default behavior
+  // YouTube
+  if (['youtube.com', 'youtu.be', 'youtube-nocookie.com'].includes(host)) {
+    const id =
+      host === 'youtu.be' ? seg[0]
+      : url.pathname === '/watch' ? url.searchParams.get('v')
+      : (m = url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)) && m[1];
+    if (!id || !/^[\w-]+$/.test(id)) return null;
+    const e = new URL('https://www.youtube-nocookie.com/embed/' + id);
+    const t = url.searchParams.get('start') || url.searchParams.get('t');
+    if (t && /^\d+$/.test(t)) e.searchParams.set('start', t);
+    return { provider: 'youtube', embedUrl: e.href };
+  }
+
+  // Vimeo
+  if (host === 'vimeo.com' || host === 'player.vimeo.com') {
+    m = url.pathname.match(/^\/(?:video\/|channels\/[^/]+\/|groups\/[^/]+\/videos\/)?(\d+)/);
+    return m ? { provider: 'vimeo', embedUrl: 'https://player.vimeo.com/video/' + m[1] } : null;
+  }
+
+  // Dailymotion
+  if (host === 'dailymotion.com' || host === 'dai.ly') {
+    const id = host === 'dai.ly'
+      ? seg[0]
+      : (m = url.pathname.match(/^\/(?:video|embed\/video)\/([^_/?]+)/)) && m[1];
+    return id ? { provider: 'dailymotion', embedUrl: 'https://www.dailymotion.com/embed/video/' + id } : null;
+  }
+
+  // TikTok
+  if (host === 'tiktok.com') {
+    m = url.pathname.match(/^\/@[^/]+\/video\/(\d+)/) || url.pathname.match(/^\/embed\/v2\/(\d+)/);
+    return m ? { provider: 'tiktok', embedUrl: 'https://www.tiktok.com/embed/v2/' + m[1] } : null;
+  }
+
+  // Instagram
+  if (host === 'instagram.com') {
+    m = url.pathname.match(/^\/(reel|p|tv)\/([\w-]+)/);
+    return m ? { provider: 'instagram', embedUrl: `https://www.instagram.com/${m[1]}/${m[2]}/embed/` } : null;
+  }
+
+  // Facebook
+  if (host === 'facebook.com' || host === 'fb.watch') {
+    if (host === 'facebook.com') {
+      const isVideo =
+        url.pathname === '/plugins/video.php' ||
+        url.pathname.replace(/\/+$/, '') === '/watch' ||
+        /^\/(?:reel|videos)\/[\w.-]+/.test(url.pathname) ||
+        /^\/[\w.-]+\/videos\/[\w.-]+/.test(url.pathname);
+      if (!isVideo) return null;
+    }
+    const e = new URL('https://www.facebook.com/plugins/video.php');
+    e.searchParams.set('href', url.href);
+    e.searchParams.set('show_text', '0');
+    return { provider: 'facebook', embedUrl: e.href };
+  }
+
+  // Twitch (client must append &parent=<its host>)
+  if (['twitch.tv', 'clips.twitch.tv', 'player.twitch.tv'].includes(host)) {
+    const e = new URL('https://player.twitch.tv/');
+    if (host === 'player.twitch.tv') {
+      ['video', 'clip', 'channel'].forEach(function (k) {
+        const v = url.searchParams.get(k);
+        if (v) e.searchParams.set(k, v);
+      });
+      if (![...e.searchParams.keys()].length) return null;
+    } else if (host === 'clips.twitch.tv') {
+      if (!seg[0]) return null;
+      e.searchParams.set('clip', seg[0]);
+    } else if ((m = url.pathname.match(/^\/videos\/(\d+)/))) {
+      e.searchParams.set('video', m[1]);
+    } else if ((m = url.pathname.match(/^\/[^/]+\/clip\/([^/]+)/))) {
+      e.searchParams.set('clip', m[1]);
+    } else if (seg.length === 1) {
+      e.searchParams.set('channel', seg[0]);
+    } else {
+      return null;
+    }
+    return { provider: 'twitch', embedUrl: e.href };
+  }
+
+  // Streamable
+  if (host === 'streamable.com') {
+    m = url.pathname.match(/^\/(?:e\/)?([\w-]+)/);
+    return m ? { provider: 'streamable', embedUrl: 'https://streamable.com/e/' + m[1] } : null;
+  }
+
+  return null;
+}
+
+function classifyMedia(src, declaredType) {
+  if (!src || typeof src !== 'string') return null;
+
+  let url;
+  try { url = new URL(src); } catch { return null; }
+  if (!/^https?:$/.test(url.protocol)) return null;
+
+  const declared = (declaredType || '').toLowerCase();
+
+  const embed = toEmbed(url);
+  if (embed) return { type: 'embed', url: src, provider: embed.provider, embedUrl: embed.embedUrl };
+
+  if (declared === 'video' || declared.startsWith('video/') || VIDEO_EXT.test(url.pathname)) {
+    return { type: 'video', url: src, provider: null, embedUrl: null };
+  }
+
+  return { type: 'image', url: src, provider: null, embedUrl: null };
 }
 
 function withMediaTypes(article) {
-    return {
-        ...article,
-        img_type: detectMediaType(article.img),
-        img2_type: detectMediaType(article.img2),
-    };
+  const m1 = classifyMedia(article.img, article.img_type);
+  const m2 = classifyMedia(article.img2, article.img2_type);
+
+  // old frontend vocabulary: "img" | "video" | "embed"
+  const legacy = m => (m ? (m.type === 'image' ? 'img' : m.type) : null);
+
+  return {
+    ...article,
+    img_type: legacy(m1),
+    img2_type: legacy(m2),
+    media: [m1, m2].filter(Boolean),
+  };
 }
 
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
+
+    if (!category) return res.status(400).json({ error: 'category required' });
 
     // HOME — all categories, recency first
     if (category === 'trends') {
@@ -475,7 +597,7 @@ app.delete('/admin/songs/:id', adminOnly, async function(req, res) {
 // ── GET /search ──
 app.get('/search', async function(req, res) {
   var q = req.query.q;
-  if (!q) return res.json([]);
+  if (!q) return res.json({ articles: [], stories: [], songs: [] });
 
   const [articles, stories, songs] = await Promise.all([
     supabase.from('articles').select('id, category, headline, img, time').ilike('headline', '%' + q + '%'),
@@ -546,5 +668,3 @@ var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
   console.log('JisScroL API running on port ' + PORT);
 });
-
-
