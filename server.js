@@ -246,7 +246,7 @@ app.post('/visit', async function(req, res) {
 //   img_type / img2_type  → legacy vocabulary ('img' | 'video' | 'embed')
 //                           so the old web frontend keeps working
 
-const VIDEO_EXT = /\.(mp4|m4v|webm|ogv|ogg|mov|3gp|m3u8|mpd)$/i;
+const VIDEO_EXT = /\.(mp4|m4v|webm|ogv|ogg|mov|3gp|m3u8|mpd|ts)$/i;
 
 function toEmbed(url) {
   const host = url.hostname.toLowerCase().replace(/^www\.|^m\./, '');
@@ -258,7 +258,7 @@ function toEmbed(url) {
     const id =
       host === 'youtu.be' ? seg[0]
       : url.pathname === '/watch' ? url.searchParams.get('v')
-      : (m = url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)) && m[1];
+      : (m = url.pathname.match(/^\/(?:embed|shorts|live|v)\/([^/]+)/)) && m[1];
     if (!id || !/^[\w-]+$/.test(id)) return null;
     const e = new URL('https://www.youtube-nocookie.com/embed/' + id);
     const t = url.searchParams.get('start') || url.searchParams.get('t');
@@ -294,11 +294,15 @@ function toEmbed(url) {
 
   // Facebook
   if (host === 'facebook.com' || host === 'fb.watch') {
+    // already an embed URL → use it as-is (don't wrap it a second time)
+    if (host === 'facebook.com' && url.pathname === '/plugins/video.php') {
+      return { provider: 'facebook', embedUrl: url.href };
+    }
     if (host === 'facebook.com') {
       const isVideo =
-        url.pathname === '/plugins/video.php' ||
         url.pathname.replace(/\/+$/, '') === '/watch' ||
         /^\/(?:reel|videos)\/[\w.-]+/.test(url.pathname) ||
+        /^\/share\/(?:v|r)\/[\w.-]+/.test(url.pathname) ||
         /^\/[\w.-]+\/videos\/[\w.-]+/.test(url.pathname);
       if (!isVideo) return null;
     }
@@ -343,21 +347,39 @@ function toEmbed(url) {
 
 function classifyMedia(src, declaredType) {
   if (!src || typeof src !== 'string') return null;
-
-  let url;
-  try { url = new URL(src); } catch { return null; }
-  if (!/^https?:$/.test(url.protocol)) return null;
+  src = src.trim();
+  if (!src) return null;
 
   const declared = (declaredType || '').toLowerCase();
+  const declaredVideo = declared === 'video' || declared.startsWith('video/');
+  const media = function (type) {
+    return { type: type, url: src, provider: null, embedUrl: null };
+  };
 
-  const embed = toEmbed(url);
-  if (embed) return { type: 'embed', url: src, provider: embed.provider, embedUrl: embed.embedUrl };
-
-  if (declared === 'video' || declared.startsWith('video/') || VIDEO_EXT.test(url.pathname)) {
-    return { type: 'video', url: src, provider: null, embedUrl: null };
+  // data: URIs (inline images / videos)
+  if (/^data:/i.test(src)) {
+    if (/^data:video\//i.test(src)) return media('video');
+    if (/^data:image\//i.test(src)) return media('image');
+    return null;
   }
 
-  return { type: 'image', url: src, provider: null, embedUrl: null };
+  // Absolute URL?
+  let url = null;
+  try { url = new URL(src); } catch (e) { url = null; }
+
+  if (url) {
+    if (!/^https?:$/.test(url.protocol)) return null; // blocks javascript:, ftp:, etc.
+
+    const embed = toEmbed(url);
+    if (embed) return { type: 'embed', url: src, provider: embed.provider, embedUrl: embed.embedUrl };
+
+    return (declaredVideo || VIDEO_EXT.test(url.pathname)) ? media('video') : media('image');
+  }
+
+  // Relative or protocol-less path ("/vids/a.mp4", "videos/a.mp4", "//cdn.site/a.mp4"):
+  // can't be an embed, so judge by declared type / file extension on the raw path.
+  const path = src.split(/[?#]/)[0];
+  return (declaredVideo || VIDEO_EXT.test(path)) ? media('video') : media('image');
 }
 
 function withMediaTypes(article) {
