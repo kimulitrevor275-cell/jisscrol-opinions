@@ -685,6 +685,41 @@ app.get("/standings", (req, res) => {
 
 
 
+const NEWS_API_KEY = process.env.NEWS_API_KEY;
+
+async function fetchNews() {
+  try {
+    const uganda = await fetch(`https://newsapi.org/v2/top-headlines?country=ug&apiKey=${NEWS_API_KEY}`)
+      .then(r => r.json());
+    
+    const ugandaClean = (uganda.articles || []).map(a => ({
+      title: a.title,
+      source: a.source.name,
+      image: a.urlToImage,
+      link: a.url,
+      popularity: a.description || ''
+    }));
+    
+    cache.set('news_uganda', ugandaClean);
+    console.log(`Cached ${ugandaClean.length} Uganda news`);
+  } catch (e) {
+    console.error('News API error:', e.message);
+  }
+}
+
+// Fetch on startup
+fetchNews();
+
+// Refresh every hour
+setInterval(fetchNews, 3600000);
+
+// Endpoint
+app.get("/news/uganda", (req, res) => {
+  const articles = cache.get('news_uganda') || [];
+  res.json({ articles });
+});
+
+
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
