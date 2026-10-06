@@ -689,7 +689,7 @@ const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 async function fetchNews() {
   try {
-    const uganda = await fetch(`https://newsapi.org/v2/top-headlines?country=ug&apiKey=${NEWS_API_KEY}`)
+    const uganda = await fetch(`https://newsapi.org/v2/everything?q=Uganda&sortBy=publishedAt&apiKey=${NEWS_API_KEY}&pageSize=10`)
       .then(r => r.json());
     
     const ugandaClean = (uganda.articles || []).map(a => ({
@@ -706,7 +706,6 @@ async function fetchNews() {
     console.error('News API error:', e.message);
   }
 }
-
 // Fetch on startup
 fetchNews();
 
