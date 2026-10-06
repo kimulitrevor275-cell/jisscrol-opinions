@@ -687,32 +687,61 @@ app.get("/standings", (req, res) => {
 
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
+const NEWS_QUERIES = [
+  'Uganda',
+  'Africa NOT Uganda',
+  'technology OR AI',
+  'Africa AND technology'
+];
+
 async function fetchNews() {
   try {
-    const uganda = await fetch(`https://newsapi.org/v2/everything?q=Uganda&sortBy=publishedAt&apiKey=${NEWS_API_KEY}&pageSize=10`)
-      .then(r => r.json());
-    
-    const ugandaClean = (uganda.articles || []).map(a => ({
-      title: a.title,
-      source: a.source.name,
-      image: a.urlToImage,
-      link: a.url,
-      popularity: a.description || ''
+    const results = await Promise.all(NEWS_QUERIES.map(async (q) => {
+      const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${NEWS_API_KEY}`;
+      const data = await fetch(url).then(r => r.json());
+
+      return (data.articles || [])
+        .filter(a => a.title && a.url && a.title !== '[Removed]')
+        .map(a => ({
+          title: a.title,
+          source: a.source.name,
+          image: a.urlToImage,
+          link: a.url,
+          popularity: a.description || ''
+        }));
     }));
-    
-    cache.set('news_uganda', ugandaClean);
-    console.log(`Cached ${ugandaClean.length} Uganda news`);
+
+    // Mix: one from each query in turn, skipping duplicates
+    const mixed = [];
+    const seen = new Set();
+    const maxLen = Math.max(...results.map(r => r.length));
+    for (let i = 0; i < maxLen; i++) {
+      for (const list of results) {
+        const item = list[i];
+        if (item && !seen.has(item.link)) {
+          seen.add(item.link);
+          mixed.push(item);
+        }
+      }
+    }
+
+    // Only replace the cache if we got results, so a rate-limit error doesn't wipe good data
+    if (mixed.length) {
+      cache.set('news_uganda', mixed, 0);
+      console.log(`Cached ${mixed.length} mixed news`);
+    }
   } catch (e) {
     console.error('News API error:', e.message);
   }
 }
+
 // Fetch on startup
 fetchNews();
 
-// Refresh every hour
-setInterval(fetchNews, 3600000);
+// Refresh every 2 hours
+setInterval(fetchNews, 7200000);
 
-// Endpoint
+// Endpoint (unchanged, so the frontend stays the same)
 app.get("/news/uganda", (req, res) => {
   const articles = cache.get('news_uganda') || [];
   res.json({ articles });
@@ -722,5 +751,5 @@ app.get("/news/uganda", (req, res) => {
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
-  console.log('JisScroL API running on port ' + PORT);
+  console.log('JisScroL API running on port 3000'.replace('3000', PORT));
 });
