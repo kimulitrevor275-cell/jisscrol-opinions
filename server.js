@@ -622,13 +622,13 @@ app.get('/search', async function(req, res) {
   if (!q) return res.json({ articles: [], stories: [], songs: [] });
 
   const [articles, stories, songs] = await Promise.all([
-    supabase.from('articles').select('id, category, headline, img, time').ilike('headline', '%' + q + '%'),
+    supabase.from('articles').select('id, category, headline, img, img_type, img2, img2_type, time').ilike('headline', '%' + q + '%'),
     supabase.from('stories').select('id, title, snippet, img, cat').ilike('title', '%' + q + '%'),
     supabase.from('songs').select('id, name, artist, img, rank').ilike('name', '%' + q + '%')
   ]);
 
   res.json({
-    articles : articles.data || [],
+    articles : (articles.data || []).map(withMediaTypes),
     stories  : stories.data  || [],
     songs    : songs.data    || []
   });
