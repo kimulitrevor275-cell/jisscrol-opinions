@@ -481,11 +481,43 @@ app.get('/articles', async function(req, res) {
 });
 
 const FRONTEND = 'https://jisscroln.vercel.app';
-const DEFAULT_IMG = FRONTEND + '/pics/share-default.png';
+const DEFAULT_IMG = FRONTEND + '/pics/share-default.png'; // 1200x630, under 300 KB
+const SITE_NAME = 'JisScroL';
+const THEME_COLOR = '#6ea0c9';   // Discord uses this as the embed's side colour
+const TWITTER_HANDLE = '';       // e.g. '@yourhandle'. Leave empty to skip
 
 const esc = (s) => String(s || '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// first value if Express gives an array
+const qs = (v) => String(Array.isArray(v) ? v[0] : (v || ''));
+
+// strip html and links, collapse spaces, cut to n characters
+function clip(s, n) {
+  s = String(s || '').replace(/<[^>]*>/g, ' ').replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+}
+
+// absolute https image URL, or the default
+function safeImage(u) {
+  try {
+    const url = new URL(u, FRONTEND);
+    if (url.protocol === 'http:') url.protocol = 'https:';
+    return url.protocol === 'https:' ? url.href : DEFAULT_IMG;
+  } catch (e) {
+    return DEFAULT_IMG;
+  }
+}
+
+function imageType(u) {
+  const p = u.split('?')[0].toLowerCase();
+  if (p.endsWith('.png')) return 'image/png';
+  if (p.endsWith('.webp')) return 'image/webp';
+  if (p.endsWith('.gif')) return 'image/gif';
+  return 'image/jpeg';
+}
 
 app.get('/share/:id', async function (req, res) {
   const id = req.params.id;
@@ -493,45 +525,89 @@ app.get('/share/:id', async function (req, res) {
   let desc = 'Read the story and share your opinion on JisScroL.';
   let image = DEFAULT_IMG;
   let target = FRONTEND + '/comments/?post_id=' + encodeURIComponent(id);
+  let shareUrl = FRONTEND + '/share/' + encodeURIComponent(id);
+  let published = '';
+  let section = '';
 
-  if (req.query.news === 'uganda') {
-    title = req.query.headline || title;
-    image = /^https?:\/\//.test(req.query.image || '') ? req.query.image : image;
-    target = FRONTEND + '/comments/?' + new URLSearchParams(req.query).toString();
-  } else {
-    const { data, error } = await supabase
-      .from('articles')
-      .select('*')
-      .eq('id', id)
-      .single();
+  try {
+    if (req.query.news === 'uganda') {
+      title = qs(req.query.headline) || title;
+      desc = clip(qs(req.query.content), 200) || desc;
+      image = qs(req.query.image) || image;
+      const q = new URLSearchParams(req.query).toString();
+      target = FRONTEND + '/comments/?' + q;
+      shareUrl = shareUrl + '?' + q;
+    } else {
+      const { data, error } = await supabase
+        .from('articles').select('*').eq('id', id).single();
 
-    if (!error && data) {
-      const article = withMediaTypes(data);
-      title = article.headline || title;
-      desc = String(article.body || desc).replace(/\s+/g, ' ').trim().slice(0, 200);
-      const img = (article.media || []).find(function (m) { return m.type === 'image'; });
-      if (img && img.url) image = img.url;
+      if (!error && data) {
+        const article = withMediaTypes(data);
+        title = article.headline || title;
+        desc = clip(article.body, 200) || desc;
+        const img = (article.media || []).find(function (m) { return m.type === 'image'; });
+        // rename the fallbacks to your real thumbnail columns, if you have any
+        image = (img && img.url) || article.thumbnail || article.thumbnail_url || image;
+        section = article.category || '';
+        const d = new Date(article.created_at);
+        if (!isNaN(d.getTime())) published = d.toISOString();
+      }
     }
+  } catch (err) {
+    console.error('share lookup failed:', err.message);
   }
 
+  title = clip(title, 100);
+  image = safeImage(image);
+  const isDefault = image === DEFAULT_IMG;
+  const alt = title;
+
+  const tags = [
+    '<meta charset="UTF-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<title>' + esc(title) + '</title>',
+    '<meta name="description" content="' + esc(desc) + '">',
+    '<meta name="robots" content="noindex">',
+    '<meta name="theme-color" content="' + THEME_COLOR + '">',
+
+    // Open Graph: WhatsApp, Telegram, Facebook, LinkedIn, Discord, Slack, iMessage
+    '<meta property="og:type" content="article">',
+    '<meta property="og:site_name" content="' + esc(SITE_NAME) + '">',
+    '<meta property="og:url" content="' + esc(shareUrl) + '">',
+    '<meta property="og:title" content="' + esc(title) + '">',
+    '<meta property="og:description" content="' + esc(desc) + '">',
+    '<meta property="og:image" content="' + esc(image) + '">',
+    '<meta property="og:image:secure_url" content="' + esc(image) + '">',
+    '<meta property="og:image:type" content="' + imageType(image) + '">',
+    '<meta property="og:image:alt" content="' + esc(alt) + '">',
+    '<meta property="og:locale" content="en_US">'
+  ];
+
+  // only declare the size when we know it (the default image)
+  if (isDefault) {
+    tags.push('<meta property="og:image:width" content="1200">');
+    tags.push('<meta property="og:image:height" content="630">');
+  }
+  if (published) tags.push('<meta property="article:published_time" content="' + esc(published) + '">');
+  if (section) tags.push('<meta property="article:section" content="' + esc(section) + '">');
+
+  // X (Twitter)
+  tags.push('<meta name="twitter:card" content="summary_large_image">');
+  tags.push('<meta name="twitter:title" content="' + esc(title) + '">');
+  tags.push('<meta name="twitter:description" content="' + esc(desc) + '">');
+  tags.push('<meta name="twitter:image" content="' + esc(image) + '">');
+  tags.push('<meta name="twitter:image:alt" content="' + esc(alt) + '">');
+  if (TWITTER_HANDLE) tags.push('<meta name="twitter:site" content="' + esc(TWITTER_HANDLE) + '">');
+
+  const redirectJs = JSON.stringify(target).replace(/</g, '\\u003c');
+
   res.set('Cache-Control', 'public, max-age=300');
-  res.send('<!DOCTYPE html><html lang="en"><head>' +
-    '<meta charset="UTF-8">' +
-    '<title>' + esc(title) + '</title>' +
-    '<meta property="og:type" content="article">' +
-    '<meta property="og:site_name" content="JiScroL">' +
-    '<meta property="og:title" content="' + esc(title) + '">' +
-    '<meta property="og:description" content="' + esc(desc) + '">' +
-    '<meta property="og:image" content="' + esc(image) + '">' +
-    '<meta name="twitter:card" content="summary_large_image">' +
-    '<meta name="twitter:title" content="' + esc(title) + '">' +
-    '<meta name="twitter:description" content="' + esc(desc) + '">' +
-    '<meta name="twitter:image" content="' + esc(image) + '">' +
-    '<meta http-equiv="refresh" content="0;url=' + esc(target) + '">' +
-    '</head><body>' +
-    '<script>location.replace(' + JSON.stringify(target) + ');</script>' +
-    '<a href="' + esc(target) + '">Continue to JiScroL</a>' +
-    '</body></html>');
+  res.type('html').send(
+    '<!DOCTYPE html><html lang="en"><head>' + tags.join('') + '</head><body>' +
+    '<script>location.replace(' + redirectJs + ');</script>' +
+    '<a href="' + esc(target) + '">Continue to ' + esc(SITE_NAME) + '</a>' +
+    '</body></html>'
+  );
 });
 app.get('/stories', async function(req, res) {
   const { data, error } = await supabase
