@@ -480,7 +480,59 @@ app.get('/articles', async function(req, res) {
     return res.json(scored.sort((a, b) => b._score - a._score).map(withMediaTypes));
 });
 
+const FRONTEND = 'https://jisscroln.vercel.app';
+const DEFAULT_IMG = FRONTEND + '/pics/share-default.png';
 
+const esc = (s) => String(s || '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+app.get('/share/:id', async function (req, res) {
+  const id = req.params.id;
+  let title = 'The JiScroL';
+  let desc = 'Read the story and share your opinion on JisScroL.';
+  let image = DEFAULT_IMG;
+  let target = FRONTEND + '/comments/?post_id=' + encodeURIComponent(id);
+
+  if (req.query.news === 'uganda') {
+    title = req.query.headline || title;
+    image = /^https?:\/\//.test(req.query.image || '') ? req.query.image : image;
+    target = FRONTEND + '/comments/?' + new URLSearchParams(req.query).toString();
+  } else {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (!error && data) {
+      const article = withMediaTypes(data);
+      title = article.headline || title;
+      desc = String(article.body || desc).replace(/\s+/g, ' ').trim().slice(0, 200);
+      const img = (article.media || []).find(function (m) { return m.type === 'image'; });
+      if (img && img.url) image = img.url;
+    }
+  }
+
+  res.set('Cache-Control', 'public, max-age=300');
+  res.send('<!DOCTYPE html><html lang="en"><head>' +
+    '<meta charset="UTF-8">' +
+    '<title>' + esc(title) + '</title>' +
+    '<meta property="og:type" content="article">' +
+    '<meta property="og:site_name" content="JiScroL">' +
+    '<meta property="og:title" content="' + esc(title) + '">' +
+    '<meta property="og:description" content="' + esc(desc) + '">' +
+    '<meta property="og:image" content="' + esc(image) + '">' +
+    '<meta name="twitter:card" content="summary_large_image">' +
+    '<meta name="twitter:title" content="' + esc(title) + '">' +
+    '<meta name="twitter:description" content="' + esc(desc) + '">' +
+    '<meta name="twitter:image" content="' + esc(image) + '">' +
+    '<meta http-equiv="refresh" content="0;url=' + esc(target) + '">' +
+    '</head><body>' +
+    '<script>location.replace(' + JSON.stringify(target) + ');</script>' +
+    '<a href="' + esc(target) + '">Continue to JiScroL</a>' +
+    '</body></html>');
+});
 app.get('/stories', async function(req, res) {
   const { data, error } = await supabase
     .from('stories')
