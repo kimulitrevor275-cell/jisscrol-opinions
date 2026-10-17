@@ -482,7 +482,7 @@ app.get('/articles', async function(req, res) {
 
 const FRONTEND = 'https://jisscroln.vercel.app';
 const DEFAULT_IMG = FRONTEND + '/pics/share-default.png'; // 1200x630, under 300 KB
-const SITE_NAME = 'JisScroL';
+const SITE_NAME = 'JiScroL';
 const THEME_COLOR = '#6ea0c9';   // Discord uses this as the embed's side colour
 const TWITTER_HANDLE = '';       // e.g. '@yourhandle'. Leave empty to skip
 
@@ -522,7 +522,7 @@ function imageType(u) {
 app.get('/share/:id', async function (req, res) {
   const id = req.params.id;
   let title = 'The JiScroL';
-  let desc = 'Read the story and share your opinion on JisScroL.';
+  let desc = 'Read the story and share your opinion on JiScroL.';
   let image = DEFAULT_IMG;
   let target = FRONTEND + '/comments/?post_id=' + encodeURIComponent(id);
   let shareUrl = FRONTEND + '/share/' + encodeURIComponent(id);
@@ -601,7 +601,7 @@ app.get('/share/:id', async function (req, res) {
 
   const redirectJs = JSON.stringify(target).replace(/</g, '\\u003c');
 
-  res.set('Cache-Control', 'public, max-age=300');
+  res.set('Cache-Control', 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400');
   res.type('html').send(
     '<!DOCTYPE html><html lang="en"><head>' + tags.join('') + '</head><body>' +
     '<script>location.replace(' + redirectJs + ');</script>' +
