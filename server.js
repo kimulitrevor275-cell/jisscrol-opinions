@@ -483,24 +483,22 @@ app.get('/articles', async function(req, res) {
 const FRONTEND = 'https://jisscroln.vercel.app';
 const DEFAULT_IMG = FRONTEND + '/pics/share-default.png'; // 1200x630, under 300 KB
 const SITE_NAME = 'JiScroL';
-const THEME_COLOR = '#6ea0c9';   // Discord uses this as the embed's side colour
-const TWITTER_HANDLE = '';       // e.g. '@yourhandle'. Leave empty to skip
+const THEME_COLOR = '#6ea0c9';
+const TWITTER_HANDLE = '';
+const FALLBACK_DESC = 'Tap to read the full story and join the conversation on JiScroL.';
 
 const esc = (s) => String(s || '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-// first value if Express gives an array
 const qs = (v) => String(Array.isArray(v) ? v[0] : (v || ''));
 
-// strip html and links, collapse spaces, cut to n characters
 function clip(s, n) {
   s = String(s || '').replace(/<[^>]*>/g, ' ').replace(/https?:\/\/\S+/g, '')
     .replace(/\s+/g, ' ').trim();
   return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
 }
 
-// absolute https image URL, or the default
 function safeImage(u) {
   try {
     const url = new URL(u, FRONTEND);
@@ -509,6 +507,13 @@ function safeImage(u) {
   } catch (e) {
     return DEFAULT_IMG;
   }
+}
+
+// Cloudinary serves a 1200x630 copy, which gives WhatsApp the big card
+function shrinkImage(u) {
+  return u.includes('res.cloudinary.com') && u.includes('/upload/')
+    ? u.replace('/upload/', '/upload/w_1200,h_630,c_fill,g_auto,q_auto,f_jpg/')
+    : u;
 }
 
 function imageType(u) {
@@ -522,7 +527,7 @@ function imageType(u) {
 app.get('/share/:id', async function (req, res) {
   const id = req.params.id;
   let title = 'The JiScroL';
-  let desc = 'Read the story and share your opinion on JiScroL.';
+  let desc = FALLBACK_DESC;
   let image = DEFAULT_IMG;
   let target = FRONTEND + '/comments/?post_id=' + encodeURIComponent(id);
   let shareUrl = FRONTEND + '/share/' + encodeURIComponent(id);
@@ -546,7 +551,6 @@ app.get('/share/:id', async function (req, res) {
         title = article.headline || title;
         desc = clip(article.body, 200) || desc;
         const img = (article.media || []).find(function (m) { return m.type === 'image'; });
-        // rename the fallbacks to your real thumbnail columns, if you have any
         image = (img && img.url) || article.thumbnail || article.thumbnail_url || image;
         section = article.category || '';
         const d = new Date(article.created_at);
@@ -560,6 +564,9 @@ app.get('/share/:id', async function (req, res) {
   title = clip(title, 100);
   image = safeImage(image);
   const isDefault = image === DEFAULT_IMG;
+  image = shrinkImage(image);
+  const knownSize = isDefault || image.includes('w_1200,h_630');
+  const ogType = image.includes('f_jpg') ? 'image/jpeg' : imageType(image);
   const alt = title;
 
   const tags = [
@@ -569,8 +576,6 @@ app.get('/share/:id', async function (req, res) {
     '<meta name="description" content="' + esc(desc) + '">',
     '<meta name="robots" content="noindex">',
     '<meta name="theme-color" content="' + THEME_COLOR + '">',
-
-    // Open Graph: WhatsApp, Telegram, Facebook, LinkedIn, Discord, Slack, iMessage
     '<meta property="og:type" content="article">',
     '<meta property="og:site_name" content="' + esc(SITE_NAME) + '">',
     '<meta property="og:url" content="' + esc(shareUrl) + '">',
@@ -578,20 +583,18 @@ app.get('/share/:id', async function (req, res) {
     '<meta property="og:description" content="' + esc(desc) + '">',
     '<meta property="og:image" content="' + esc(image) + '">',
     '<meta property="og:image:secure_url" content="' + esc(image) + '">',
-    '<meta property="og:image:type" content="' + imageType(image) + '">',
+    '<meta property="og:image:type" content="' + ogType + '">',
     '<meta property="og:image:alt" content="' + esc(alt) + '">',
     '<meta property="og:locale" content="en_US">'
   ];
 
-  // only declare the size when we know it (the default image)
-  if (isDefault) {
+  if (knownSize) {
     tags.push('<meta property="og:image:width" content="1200">');
     tags.push('<meta property="og:image:height" content="630">');
   }
   if (published) tags.push('<meta property="article:published_time" content="' + esc(published) + '">');
   if (section) tags.push('<meta property="article:section" content="' + esc(section) + '">');
 
-  // X (Twitter)
   tags.push('<meta name="twitter:card" content="summary_large_image">');
   tags.push('<meta name="twitter:title" content="' + esc(title) + '">');
   tags.push('<meta name="twitter:description" content="' + esc(desc) + '">');
