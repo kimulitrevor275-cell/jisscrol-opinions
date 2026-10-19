@@ -768,54 +768,91 @@ app.get('/search', async function(req, res) {
 const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 3600 });
 
+// ─────────────────────────────────────────
+//  FOOTBALL (live / played / upcoming)
+// ─────────────────────────────────────────
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY;
-const COMPETITIONS = ['PL', 'LA', 'BL1', 'SA', 'FL1'];
+// PL = Premier League, PD = La Liga (NOT "LA"), BL1 = Bundesliga,
+// SA = Serie A, FL1 = Ligue 1, CL = Champions League
+const COMPETITIONS = ['PL', 'PD', 'BL1', 'SA', 'FL1', 'CL'];
 
-async function fetchFootballData() {
-  try {
-    // Fetch matches
-    const matches = await Promise.all(
-      COMPETITIONS.map(comp =>
-        fetch(`https://api.football-data.org/v4/competitions/${comp}/matches?status=SCHEDULED`, {
-          headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
-        }).then(r => r.json())
-      )
-    );
-    const allMatches = matches.flatMap(m => m.matches || []);
-    cache.set('football_matches', allMatches);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
 
-    // Fetch standings
-    const standings = await Promise.all(
-      COMPETITIONS.map(comp =>
-        fetch(`https://api.football-data.org/v4/competitions/${comp}/standings`, {
-          headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
-        }).then(r => r.json())
-      )
-    );
-    cache.set('football_standings', standings);
-    
-    console.log(`Cached ${allMatches.length} matches & standings`);
-  } catch (e) {
-    console.error('Football API error:', e.message);
-  }
+async function footballGet(path) {
+  const res = await fetch('https://api.football-data.org/v4' + path, {
+    headers: { 'X-Auth-Token': FOOTBALL_API_KEY }
+  });
+  if (!res.ok) throw new Error(res.status + ' ' + path);
+  return res.json();
 }
 
-fetchFootballData();
-setInterval(fetchFootballData, 3600000);
+// matches: last 4 days + next 4 days, one call per competition
+async function fetchMatches() {
+  const results = await Promise.allSettled(
+    COMPETITIONS.map((c) => footballGet(`/competitions/${c}/matches?dateFrom=${day(-4)}&dateTo=${day(4)}`))
+  );
+  results.forEach((r, i) => {
+    // a failed call keeps that league's previous data instead of wiping it
+    if (r.status === 'fulfilled') cache.set('fm_' + COMPETITIONS[i], r.value.matches || [], 0);
+    else console.error('Football matches failed:', COMPETITIONS[i], r.reason.message);
+  });
+}
 
-app.get("/footstat", (req, res) => {
-  const matches = cache.get('football_matches') || [];
-  res.json({ matches, cached: true, count: matches.length });
+function splitMatches() {
+  const all = COMPETITIONS.flatMap((c) => cache.get('fm_' + c) || []);
+  const t = (m) => new Date(m.utcDate).getTime();
+  return {
+    live: all.filter((m) => ['IN_PLAY', 'PAUSED'].includes(m.status)).sort((a, b) => t(a) - t(b)),
+    upcoming: all.filter((m) => ['SCHEDULED', 'TIMED'].includes(m.status)).sort((a, b) => t(a) - t(b)),
+    played: all.filter((m) => m.status === 'FINISHED').sort((a, b) => t(b) - t(a))
+  };
+}
+
+// free tier = 10 requests/min, so refresh fast only when it matters
+function nextMatchDelay() {
+  const { live, upcoming } = splitMatches();
+  if (live.length) return 60 * 1000;                          // a match is on: every minute (6 calls)
+  const soon = upcoming.some((m) => new Date(m.utcDate) - Date.now() < 30 * 60 * 1000);
+  return soon ? 5 * 60 * 1000 : 30 * 60 * 1000;               // kickoff close: 5 min, else 30 min
+}
+
+async function matchLoop() {
+  try { await fetchMatches(); } catch (e) { console.error('Football loop:', e.message); }
+  setTimeout(matchLoop, nextMatchDelay());
+}
+matchLoop();
+
+// standings: hourly, spaced out so they don't hit the 10/min limit
+async function fetchStandings() {
+  for (const c of COMPETITIONS) {
+    try { cache.set('fs_' + c, await footballGet(`/competitions/${c}/standings`), 0); }
+    catch (e) { console.error('Standings failed:', e.message); }
+    await sleep(7000);
+  }
+}
+setTimeout(function standingsLoop() {
+  fetchStandings().finally(() => setTimeout(standingsLoop, 3600000));
+}, 65000);
+
+app.get('/footstat', (req, res) => {
+  const { live, upcoming, played } = splitMatches();
+  res.json({
+    live,
+    upcoming,
+    played: played.slice(0, 30),
+    matches: upcoming,   // old field, so the current Sports page keeps working
+    delayed: true        // free plan scores run a few minutes behind
+  });
 });
 
-app.get("/standings", (req, res) => {
-  const standings = cache.get('football_standings') || [];
-  res.json({ standings });
+app.get('/standings', (req, res) => {
+  res.json({ standings: COMPETITIONS.map((c) => cache.get('fs_' + c)).filter(Boolean) });
 });
 
-
-
-
+// ─────────────────────────────────────────
+//  NEWS
+// ─────────────────────────────────────────
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 const NEWS_QUERIES = [
@@ -873,7 +910,7 @@ fetchNews();
 setInterval(fetchNews, 7200000);
 
 // Endpoint (unchanged, so the frontend stays the same)
-app.get("/news/uganda", (req, res) => {
+app.get('/news/uganda', (req, res) => {
   const articles = cache.get('news_uganda') || [];
   res.json({ articles });
 });
@@ -882,5 +919,5 @@ app.get("/news/uganda", (req, res) => {
 // ── START ──
 var PORT = process.env.PORT || 3000;
 app.listen(PORT, function() {
-  console.log('JisScroL API running on port 3000'.replace('3000', PORT));
+  console.log('JisScroL API running on port ' + PORT);
 });
