@@ -748,23 +748,55 @@ app.delete('/admin/songs/:id', adminOnly, async function(req, res) {
 });
 
 // ── GET /search ──
-app.get('/search', async function(req, res) {
-  var q = req.query.q;
-  if (!q) return res.json({ articles: [], stories: [], songs: [] });
+function searchTerms(q) {
+  return String(q || '')
+    .split(/\s+/)
+    .map(function (t) { return t.replace(/[,()"'\\%_*]/g, '').trim(); })
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+// each word must appear in at least one of the columns (any case, partial words OK)
+function matchAll(query, cols, terms) {
+  terms.forEach(function (t) {
+    query = query.or(cols.map(function (c) { return c + '.ilike.*' + t + '*'; }).join(','));
+  });
+  return query;
+}
+
+function rows(label, result) {
+  if (result.error) console.error('search ' + label + ':', result.error.message);
+  return result.data || [];
+}
+
+app.get('/search', async function (req, res) {
+  var terms = searchTerms(req.query.q);
+  if (!terms.length) return res.json({ articles: [], stories: [], songs: [] });
 
   const [articles, stories, songs] = await Promise.all([
-    supabase.from('articles').select('id, category, headline, img, img_type, img2, img2_type, time').ilike('headline', '%' + q + '%'),
-    supabase.from('stories').select('id, title, snippet, img, cat').ilike('title', '%' + q + '%'),
-    supabase.from('songs').select('id, name, artist, img, rank').ilike('name', '%' + q + '%')
+    matchAll(
+      supabase.from('articles')
+        .select('id, category, headline, img, img_type, img2, img2_type, time')
+        .limit(20),
+      ['headline', 'category'], terms),
+    matchAll(
+      supabase.from('stories')
+        .select('id, title, snippet, img, cat')
+        .limit(20),
+      ['title', 'snippet', 'cat'], terms),
+    matchAll(
+      supabase.from('songs')
+        .select('id, name, artist, img, rank')
+        .limit(20),
+      ['name', 'artist'], terms)
   ]);
 
   res.json({
-    articles : (articles.data || []).map(withMediaTypes),
-    stories  : stories.data  || [],
-    songs    : songs.data    || []
+    articles: rows('articles', articles).map(withMediaTypes),
+    stories:  rows('stories', stories),
+    songs:    rows('songs', songs)
   });
 });
-
 const NodeCache = require('node-cache');
 const cache = new NodeCache({ stdTTL: 3600 });
 
