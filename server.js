@@ -1,13 +1,10 @@
-// ─────────────────────────────────────────
-//  JisScroL API — Opinions + Ratings
-//  Stack: Express + Supabase + dotenv
-//  Deploy: Render
-// ─────────────────────────────────────────
-
 require('dotenv').config();
-const express    = require('express');
+const express = require('express');
+const NodeCache = require('node-cache');
 const { createClient } = require('@supabase/supabase-js');
+
 const app = express();
+const cache = new NodeCache({ stdTTL: 3600 });
 
 app.use(express.json());
 app.set('trust proxy', 1);
@@ -199,6 +196,7 @@ app.post('/ratings', async function(req, res) {
     total: total
   });
 });
+
 // ── POST /visit ──
 app.post('/visit', async function(req, res) {
   const { user_id } = req.body;
@@ -397,6 +395,9 @@ function withMediaTypes(article) {
   };
 }
 
+// ─────────────────────────────────────────
+//  ARTICLES
+// ─────────────────────────────────────────
 app.get('/articles', async function(req, res) {
     var category = req.query.category;
 
@@ -480,6 +481,9 @@ app.get('/articles', async function(req, res) {
     return res.json(scored.sort((a, b) => b._score - a._score).map(withMediaTypes));
 });
 
+// ─────────────────────────────────────────
+//  SHARE PREVIEW  (/share/:id → OG tags, then redirect to the frontend)
+// ─────────────────────────────────────────
 const FRONTEND = 'https://jisscroln.vercel.app';
 const DEFAULT_IMG = FRONTEND + '/pics/share-default.png'; // 1200x630, under 300 KB
 const SITE_NAME = 'JiScroL';
@@ -612,6 +616,10 @@ app.get('/share/:id', async function (req, res) {
     '</body></html>'
   );
 });
+
+// ─────────────────────────────────────────
+//  STORIES / CHARTS / SONGS / TICKERS / POLLS
+// ─────────────────────────────────────────
 app.get('/stories', async function(req, res) {
   const { data, error } = await supabase
     .from('stories')
@@ -747,7 +755,9 @@ app.delete('/admin/songs/:id', adminOnly, async function(req, res) {
   res.json({ success: true });
 });
 
-// ── GET /search ──
+// ─────────────────────────────────────────
+//  SEARCH
+// ─────────────────────────────────────────
 function searchTerms(q) {
   return String(q || '')
     .split(/\s+/)
@@ -774,11 +784,13 @@ app.get('/search', async function (req, res) {
   if (!terms.length) return res.json({ articles: [], stories: [], songs: [] });
 
   const [articles, stories, songs] = await Promise.all([
+    // select only columns that always exist (img_type / img2_type may not be real columns);
+    // withMediaTypes() works out image/video from the URL itself
     matchAll(
       supabase.from('articles')
-        .select('id, category, headline, img, img_type, img2, img2_type, time')
+        .select('id, category, headline, img, img2, time')
         .limit(20),
-      ['headline', 'category'], terms),
+      ['headline', 'category', 'body'], terms),
     matchAll(
       supabase.from('stories')
         .select('id, title, snippet, img, cat')
@@ -797,8 +809,6 @@ app.get('/search', async function (req, res) {
     songs:    rows('songs', songs)
   });
 });
-const NodeCache = require('node-cache');
-const cache = new NodeCache({ stdTTL: 3600 });
 
 // ─────────────────────────────────────────
 //  FOOTBALL (live / played / upcoming)
@@ -946,7 +956,6 @@ app.get('/news/uganda', (req, res) => {
   const articles = cache.get('news_uganda') || [];
   res.json({ articles });
 });
-
 
 // ── START ──
 var PORT = process.env.PORT || 3000;
