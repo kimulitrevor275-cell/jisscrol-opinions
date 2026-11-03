@@ -888,6 +888,19 @@ app.get('/standings', (req, res) => {
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 const SPORTS_NEWS_QUERY = 'sports OR football OR basketball OR tennis OR athletics';
+const PREMIER_LEAGUE_CLUBS = [
+  'arsenal',
+  'chelsea',
+  'liverpool',
+  'man city',
+  'manchester united',
+  'tottenham',
+  'newcastle',
+  'aston villa',
+  'west ham',
+  'brighton'
+];
+const BLOCKED_SPORTS_TERMS = ['nfl', 'nba', 'cricket', 'rugby', 'casino', 'betting odds'];
 
 const NEWS_QUERIES = [
   'Uganda',
@@ -903,8 +916,70 @@ function newsArticle(article) {
     source: article.source && article.source.name,
     image: article.urlToImage,
     link: article.url,
-    popularity: article.description || ''
+    popularity: article.description || '',
+    publishedAt: article.publishedAt
   };
+}
+
+function isRelevantSportsArticle(article) {
+  const text = `${article.title || ''} ${article.description || ''}`.toLowerCase();
+  if (BLOCKED_SPORTS_TERMS.some(term => text.includes(term))) return false;
+  return text.includes('premier league') || PREMIER_LEAGUE_CLUBS.some(club => text.includes(club));
+}
+
+function normalizedNewsUrl(link) {
+  try {
+    const url = new URL(link);
+    url.hash = '';
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString();
+  } catch (e) {
+    return String(link || '').trim();
+  }
+}
+
+function normalizedNewsTitle(title) {
+  return String(title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function dedupeNewsArticles(articles, existingUrls, existingTitles) {
+  const urls = new Set(existingUrls || []);
+  const titles = new Set(existingTitles || []);
+  return articles.filter(article => {
+    const url = normalizedNewsUrl(article.link);
+    const title = normalizedNewsTitle(article.title);
+    if (!url || !title || urls.has(url) || titles.has(title)) return false;
+    urls.add(url);
+    titles.add(title);
+    return true;
+  });
+}
+
+async function storeSportsNews(articles) {
+  const { data: existing, error: selectError } = await supabase
+    .from('articles')
+    .select('link, headline');
+
+  if (selectError) throw selectError;
+
+  const fresh = dedupeNewsArticles(
+    articles,
+    (existing || []).map(article => normalizedNewsUrl(article.link)),
+    (existing || []).map(article => normalizedNewsTitle(article.headline))
+  );
+  if (!fresh.length) return 0;
+
+  const rows = fresh.map(article => ({
+    category: 'newpage',
+    headline: article.title,
+    body: article.popularity,
+    img: article.image,
+    time: article.publishedAt,
+    link: article.link
+  }));
+  const { error: insertError } = await supabase.from('articles').insert(rows);
+  if (insertError) throw insertError;
+  return rows.length;
 }
 
 async function fetchNews() {
@@ -919,20 +994,35 @@ async function fetchNews() {
 
       return (data.articles || [])
         .filter(a => a.title && a.url && a.title !== '[Removed]')
+        .filter(a => q !== SPORTS_NEWS_QUERY || isRelevantSportsArticle(a))
         .map(newsArticle);
     }));
 
-    const sportsArticles = results[NEWS_QUERIES.indexOf(SPORTS_NEWS_QUERY)];
-    if (sportsArticles.length) cache.set('news_sports', sportsArticles, 0);
+    const sportsArticles = dedupeNewsArticles(
+      results[NEWS_QUERIES.indexOf(SPORTS_NEWS_QUERY)]
+    );
+    if (sportsArticles.length) {
+      try {
+        const stored = await storeSportsNews(sportsArticles);
+        console.log(`Stored ${stored} new Premier League news articles`);
+      } catch (e) {
+        console.error('Sports news storage error:', e.message);
+      }
+      cache.set('news_sports', sportsArticles, 0);
+    }
 
     const mixed = [];
-    const seen = new Set();
+    const seenUrls = new Set();
+    const seenTitles = new Set();
     const maxLen = Math.max(...results.map(r => r.length));
     for (let i = 0; i < maxLen; i++) {
       for (const list of results) {
         const item = list[i];
-        if (item && !seen.has(item.link)) {
-          seen.add(item.link);
+        const url = item && normalizedNewsUrl(item.link);
+        const title = item && normalizedNewsTitle(item.title);
+        if (item && !seenUrls.has(url) && !seenTitles.has(title)) {
+          seenUrls.add(url);
+          seenTitles.add(title);
           mixed.push(item);
         }
       }
