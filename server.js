@@ -810,12 +810,8 @@ app.get('/search', async function (req, res) {
   });
 });
 
-// ─────────────────────────────────────────
-//  FOOTBALL (live / played / upcoming)
-// ─────────────────────────────────────────
 const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY;
-// PL = Premier League, PD = La Liga (NOT "LA"), BL1 = Bundesliga,
-// SA = Serie A, FL1 = Ligue 1, CL = Champions League
+
 const COMPETITIONS = ['PL', 'PD', 'BL1', 'SA', 'FL1', 'CL'];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -829,13 +825,12 @@ async function footballGet(path) {
   return res.json();
 }
 
-// matches: last 4 days + next 4 days, one call per competition
 async function fetchMatches() {
   const results = await Promise.allSettled(
     COMPETITIONS.map((c) => footballGet(`/competitions/${c}/matches?dateFrom=${day(-4)}&dateTo=${day(4)}`))
   );
   results.forEach((r, i) => {
-    // a failed call keeps that league's previous data instead of wiping it
+
     if (r.status === 'fulfilled') cache.set('fm_' + COMPETITIONS[i], r.value.matches || [], 0);
     else console.error('Football matches failed:', COMPETITIONS[i], r.reason.message);
   });
@@ -851,7 +846,6 @@ function splitMatches() {
   };
 }
 
-// free tier = 10 requests/min, so refresh fast only when it matters
 function nextMatchDelay() {
   const { live, upcoming } = splitMatches();
   if (live.length) return 60 * 1000;                          // a match is on: every minute (6 calls)
@@ -865,7 +859,6 @@ async function matchLoop() {
 }
 matchLoop();
 
-// standings: hourly, spaced out so they don't hit the 10/min limit
 async function fetchStandings() {
   for (const c of COMPETITIONS) {
     try { cache.set('fs_' + c, await footballGet(`/competitions/${c}/standings`), 0); }
@@ -883,8 +876,8 @@ app.get('/footstat', (req, res) => {
     live,
     upcoming,
     played: played.slice(0, 30),
-    matches: upcoming,   // old field, so the current Sports page keeps working
-    delayed: true        // free plan scores run a few minutes behind
+    matches: upcoming,   
+    delayed: true        
   });
 });
 
@@ -892,36 +885,46 @@ app.get('/standings', (req, res) => {
   res.json({ standings: COMPETITIONS.map((c) => cache.get('fs_' + c)).filter(Boolean) });
 });
 
-// ─────────────────────────────────────────
-//  NEWS
-// ─────────────────────────────────────────
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
+
+const SPORTS_NEWS_QUERY = 'sports OR football OR basketball OR tennis OR athletics';
 
 const NEWS_QUERIES = [
   'Uganda',
   'Africa NOT Uganda',
   'technology OR AI',
-  'Africa AND technology'
+  'Africa AND technology',
+  SPORTS_NEWS_QUERY
 ];
+
+function newsArticle(article) {
+  return {
+    title: article.title,
+    source: article.source && article.source.name,
+    image: article.urlToImage,
+    link: article.url,
+    popularity: article.description || ''
+  };
+}
 
 async function fetchNews() {
   try {
     const results = await Promise.all(NEWS_QUERIES.map(async (q) => {
-      const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=10&apiKey=${NEWS_API_KEY}`;
-      const data = await fetch(url).then(r => r.json());
+      const pageSize = q === SPORTS_NEWS_QUERY ? 30 : 10;
+      const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&pageSize=${pageSize}&apiKey=${NEWS_API_KEY}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error('NewsAPI returned ' + response.status);
+      const data = await response.json();
+      if (data.status !== 'ok') throw new Error(data.message || 'NewsAPI request failed');
 
       return (data.articles || [])
         .filter(a => a.title && a.url && a.title !== '[Removed]')
-        .map(a => ({
-          title: a.title,
-          source: a.source.name,
-          image: a.urlToImage,
-          link: a.url,
-          popularity: a.description || ''
-        }));
+        .map(newsArticle);
     }));
 
-    // Mix: one from each query in turn, skipping duplicates
+    const sportsArticles = results[NEWS_QUERIES.indexOf(SPORTS_NEWS_QUERY)];
+    if (sportsArticles.length) cache.set('news_sports', sportsArticles, 0);
+
     const mixed = [];
     const seen = new Set();
     const maxLen = Math.max(...results.map(r => r.length));
@@ -935,7 +938,6 @@ async function fetchNews() {
       }
     }
 
-    // Only replace the cache if we got results, so a rate-limit error doesn't wipe good data
     if (mixed.length) {
       cache.set('news_uganda', mixed, 0);
       console.log(`Cached ${mixed.length} mixed news`);
@@ -945,15 +947,19 @@ async function fetchNews() {
   }
 }
 
-// Fetch on startup
 fetchNews();
 
-// Refresh every 2 hours
+
 setInterval(fetchNews, 7200000);
 
-// Endpoint (unchanged, so the frontend stays the same)
+
 app.get('/news/uganda', (req, res) => {
   const articles = cache.get('news_uganda') || [];
+  res.json({ articles });
+});
+
+app.get('/news/sports', (req, res) => {
+  const articles = cache.get('news_sports') || [];
   res.json({ articles });
 });
 
