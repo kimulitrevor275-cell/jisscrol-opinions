@@ -617,6 +617,111 @@ app.get('/share/:id', async function (req, res) {
   );
 });
 
+
+// ---------- helpers ----------
+function shuffle(arr) {               // Fisher-Yates: unbiased
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// ---------- cached index (scan only, no shuffling here) ----------
+let discoverCache = { at: 0, index: null, rows: null };
+const DISCOVER_TTL = 10 * 60 * 1000;
+
+async function getDiscoverIndex() {
+  if (discoverCache.index && Date.now() - discoverCache.at < DISCOVER_TTL) {
+    return discoverCache;
+  }
+
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await supabase
+    .from('articles')
+    .select('*')
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(300);
+
+  if (error) throw new Error(error.message);
+
+  const rows = {};    // id -> full article row
+  const index = {};   // term -> { score, ids: [] }
+
+  data.forEach(article => {
+    rows[article.id] = article;
+    const weights = {};
+
+    extractTerms(article.headline).forEach(t => {
+      weights[t] = (weights[t] || 0) + 3;
+    });
+    extractTerms(article.body).forEach(t => {
+      weights[t] = Math.min((weights[t] || 0) + 1, 8);
+    });
+
+    Object.keys(weights).forEach(term => {
+      if (!index[term]) index[term] = { score: 0, ids: [] };
+      index[term].score += weights[term];
+      index[term].ids.push(article.id);
+    });
+  });
+
+  // keep only terms found in 2+ articles
+  Object.keys(index).forEach(term => {
+    if (index[term].ids.length < 2) delete index[term];
+  });
+
+  discoverCache = { at: Date.now(), index, rows };
+  return discoverCache;
+}
+
+// ---------- route ----------
+app.get('/articles/discover', async function (req, res) {
+  res.set('Cache-Control', 'no-store');   // so the shuffle is never cached by a CDN/browser
+
+  let cache;
+  try {
+    cache = await getDiscoverIndex();
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const { index, rows } = cache;
+
+  // MODE 1: ?term=nvidia  ->  that keyword's articles, shuffled
+  const rawTerm = qs(req.query.term);
+  if (rawTerm) {
+    const term = String(rawTerm).toLowerCase().trim().replace(/^#/, '');
+    const entry = index[term];
+
+    if (!entry) return res.status(404).json({ error: 'keyword not found', term: term });
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+
+    const articles = shuffle(entry.ids).slice(0, limit).map(id => {
+      const row = rows[id];
+      const out = withMediaTypes(row);
+      out.snippet = clip(row.body, 200);
+      delete out.body;
+      out.link = FRONTEND + '/comments/?post_id=' + encodeURIComponent(row.id);
+      return out;
+    });
+
+    return res.json({ keyword: term, total: entry.ids.length, articles: articles });
+  }
+
+  // MODE 2: no term  ->  keyword chips (top pool, shuffled so they vary per load)
+  const pool = Object.keys(index)
+    .map(term => ({ keyword: term, count: index[term].ids.length, score: index[term].score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 40);
+
+  const limit = Math.min(parseInt(req.query.limit, 10) || 15, 40);
+  res.json(shuffle(pool).slice(0, limit));
+});
 // ─────────────────────────────────────────
 //  STORIES / CHARTS / SONGS / TICKERS / POLLS
 // ─────────────────────────────────────────
