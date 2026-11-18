@@ -616,10 +616,8 @@ app.get('/share/:id', async function (req, res) {
     '</body></html>'
   );
 });
-
-
 // ---------- helpers ----------
-function shuffle(arr) {               // Fisher-Yates: unbiased
+function shuffle(arr) {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -628,108 +626,189 @@ function shuffle(arr) {               // Fisher-Yates: unbiased
   return a;
 }
 
-// ---------- cached index (scan only, no shuffling here) ----------
+function qs(v) {
+  return Array.isArray(v) ? String(v[0] || '') : String(v || '');
+}
+
+function clip(s, n) {
+  s = String(s || '').replace(/\s+/g, ' ').trim();
+  return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s;
+}
+
+// ---------- keyword extraction ----------
+const STOP = new Set((
+  'the and for that with this from have has had was were are been will would could should about after before ' +
+  'into over than then them they their there these those what when where which while who whom whose your you ' +
+  'our out not but all any can its also more most other some such only own same too very just said says say ' +
+  'him her his she how why new now one two get got let may might must per via off because between during ' +
+  'each few both again here against above below once according told year years day days time week ' +
+  'monday tuesday wednesday thursday friday saturday sunday january february march april june july august ' +
+  'september october november december mr mrs ms dr hon sir gen prof president minister news read more ' +
+  'share comment comments follow like people government police officials'
+).split(' '));
+
+const CAPS_STOP = new Set(['THE', 'AND', 'FOR', 'NEW', 'NOT', 'ALL', 'BUT', 'HOW', 'WHY', 'WHO', 'NOW']);
+
+function cleanText(t) {
+  return String(t || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/https?:\/\/\S+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractKeywords(text, isHeadline) {
+  const clean = cleanText(text);
+  const out = new Map();
+  if (!clean) return out;
+
+  const letters = clean.replace(/[^A-Za-z]/g, '');
+  const upper = letters.replace(/[^A-Z]/g, '').length;
+  const allCaps = letters.length > 0 && upper / letters.length > 0.6;
+
+  if (!allCaps) {
+    (clean.match(/\b[A-Z]{2,6}\b/g) || []).forEach(a => {
+      if (!CAPS_STOP.has(a)) out.set(a.toLowerCase(), a);
+    });
+
+    const re = /\b[A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,}){0,2}\b/g;
+    let m;
+    while ((m = re.exec(clean))) {
+      const words = m[0].split(' ');
+      while (words.length && STOP.has(words[0].toLowerCase())) words.shift();
+      while (words.length && STOP.has(words[words.length - 1].toLowerCase())) words.pop();
+      if (!words.length) continue;
+
+      const before = clean.slice(0, m.index).trimEnd();
+      const sentenceStart = before === '' || /[.!?:]$/.test(before);
+      if (words.length === 1 && sentenceStart && m[0] === words[0]) continue;
+
+      const name = words.join(' ');
+      if (name.length < 4) continue;
+      out.set(name.toLowerCase(), name);
+    }
+  }
+
+  if (isHeadline) {
+    (clean.match(/[A-Za-z]{4,}/g) || []).forEach(w => {
+      const slug = w.toLowerCase();
+      if (STOP.has(slug) || out.has(slug)) return;
+      out.set(slug, w);
+    });
+  }
+
+  return out;
+}
+
+function containsTerm(article, slug) {
+  const re = new RegExp('\\b' + slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
+  return re.test(cleanText(article.headline) + ' ' + cleanText(article.body));
+}
+
+// ---------- cached index ----------
 let discoverCache = { at: 0, index: null, rows: null };
 const DISCOVER_TTL = 10 * 60 * 1000;
 
 async function getDiscoverIndex() {
-  if (discoverCache.index && Date.now() - discoverCache.at < DISCOVER_TTL) {
-    return discoverCache;
-  }
+  if (discoverCache.index && Date.now() - discoverCache.at < DISCOVER_TTL) return discoverCache;
 
   const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
   const { data, error } = await supabase
     .from('articles')
     .select('*')
     .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(300);
-
   if (error) throw new Error(error.message);
 
-  const rows = {};    // id -> full article row
-  const index = {};   // term -> { score, ids: [] }
+  const rows = {};
+  const index = {};
+
+  function add(slug, text, id, weight) {
+    if (!index[slug]) index[slug] = { forms: {}, score: 0, ids: [] };
+    const e = index[slug];
+    e.forms[text] = (e.forms[text] || 0) + 1;
+    e.score += weight;
+    if (e.ids.indexOf(id) === -1) e.ids.push(id);
+  }
 
   data.forEach(article => {
     rows[article.id] = article;
-    const weights = {};
+    extractKeywords(article.headline, true).forEach((text, slug) => add(slug, text, article.id, 3));
+    extractKeywords(article.body, false).forEach((text, slug) => add(slug, text, article.id, 1));
+  });
 
-    extractTerms(article.headline).forEach(t => {
-      weights[t] = (weights[t] || 0) + 3;
-    });
-    extractTerms(article.body).forEach(t => {
-      weights[t] = Math.min((weights[t] || 0) + 1, 8);
-    });
+  const maxShare = Math.max(5, data.length * 0.4);
+  Object.keys(index).forEach(slug => {
+    const n = index[slug].ids.length;
+    if (n < 2 || n > maxShare) delete index[slug];
+  });
 
-    Object.keys(weights).forEach(term => {
-      if (!index[term]) index[term] = { score: 0, ids: [] };
-      index[term].score += weights[term];
-      index[term].ids.push(article.id);
+  const slugs = Object.keys(index);
+  slugs.forEach(short => {
+    slugs.forEach(long => {
+      if (short !== long && index[short] && index[long] &&
+          long.split(' ').indexOf(short) !== -1 &&
+          index[long].ids.length >= index[short].ids.length * 0.8) {
+        delete index[short];
+      }
     });
   });
 
-  // keep only terms found in 2+ articles
-  Object.keys(index).forEach(term => {
-    if (index[term].ids.length < 2) delete index[term];
+  Object.keys(index).forEach(slug => {
+    const forms = index[slug].forms;
+    index[slug].name = Object.keys(forms).sort((a, b) => forms[b] - forms[a])[0];
   });
 
+  console.log('discover: scanned', data.length, 'articles, kept', Object.keys(index).length, 'keywords');
   discoverCache = { at: Date.now(), index, rows };
   return discoverCache;
 }
-app.get('/articles/discover', async function (req, res) {
-  res.set('Cache-Control', 'no-store');
 
-  let cache;
+// ---------- route ----------
+app.get('/articles/discover', async function (req, res) {
   try {
-    cache = await getDiscoverIndex();
+    res.set('Cache-Control', 'no-store');
+    const { index, rows } = await getDiscoverIndex();
+
+    const rawTerm = qs(req.query.term);
+    if (rawTerm) {
+      const slug = String(rawTerm).toLowerCase().trim().replace(/^#/, '');
+      const entry = index[slug];
+      if (!entry) return res.status(404).json({ error: 'keyword not found', term: slug });
+
+      const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+      const matched = entry.ids.map(id => rows[id]).filter(row => containsTerm(row, slug));
+
+      const articles = shuffle(matched).slice(0, limit).map(row => {
+        const out = withMediaTypes(row);
+        out.snippet = clip(row.body, 200);
+        delete out.body;
+        out.link = FRONTEND + '/comments/?post_id=' + encodeURIComponent(row.id);
+        return out;
+      });
+
+      return res.json({ keyword: entry.name, total: matched.length, articles: articles });
+    }
+
+    const pool = Object.keys(index)
+      .map(slug => ({
+        keyword: slug,
+        name: index[slug].name,
+        count: index[slug].ids.length,
+        score: index[slug].score
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 40);
+
+    const limit = Math.min(parseInt(req.query.limit, 10) || 15, 40);
+    return res.json(shuffle(pool).slice(0, limit));
   } catch (err) {
-    console.error('discover failed:', err.message);
+    console.error('discover crashed:', err);
     return res.status(500).json({ error: err.message });
   }
-  const { index, rows } = cache;
-
-  // MODE 1: ?term=nssf -> only articles that really contain that text, shuffled
-  const rawTerm = qs(req.query.term);
-  if (rawTerm) {
-    const slug = String(rawTerm).toLowerCase().trim().replace(/^#/, '');
-    const entry = index[slug];
-    if (!entry) return res.status(404).json({ error: 'keyword not found', term: slug });
-
-    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
-
-    const matched = entry.ids
-      .map(id => rows[id])
-      .filter(row => containsTerm(row, slug));
-
-    const articles = shuffle(matched).slice(0, limit).map(row => {
-      const out = withMediaTypes(row);
-      out.snippet = clip(row.body, 200);
-      delete out.body;
-      out.link = FRONTEND + '/comments/?post_id=' + encodeURIComponent(row.id);
-      return out;
-    });
-
-    return res.json({ keyword: entry.name, total: matched.length, articles: articles });
-  }
-
-  // MODE 2: no term -> keyword chips
-  const pool = Object.keys(index)
-    .map(slug => ({
-      keyword: slug,
-      name: index[slug].name,
-      count: index[slug].ids.length,
-      score: index[slug].score
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 40);
-
-  const limit = Math.min(parseInt(req.query.limit, 10) || 15, 40);
-  res.json(shuffle(pool).slice(0, limit));
 });
-// ─────────────────────────────────────────
-//  STORIES / CHARTS / SONGS / TICKERS / POLLS
-// ─────────────────────────────────────────
+
 app.get('/stories', async function(req, res) {
   const { data, error } = await supabase
     .from('stories')
