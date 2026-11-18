@@ -677,32 +677,32 @@ async function getDiscoverIndex() {
   discoverCache = { at: Date.now(), index, rows };
   return discoverCache;
 }
-
-// ---------- route ----------
 app.get('/articles/discover', async function (req, res) {
-  res.set('Cache-Control', 'no-store');   // so the shuffle is never cached by a CDN/browser
+  res.set('Cache-Control', 'no-store');
 
   let cache;
   try {
     cache = await getDiscoverIndex();
   } catch (err) {
+    console.error('discover failed:', err.message);
     return res.status(500).json({ error: err.message });
   }
-
   const { index, rows } = cache;
 
-  // MODE 1: ?term=nvidia  ->  that keyword's articles, shuffled
+  // MODE 1: ?term=nssf -> only articles that really contain that text, shuffled
   const rawTerm = qs(req.query.term);
   if (rawTerm) {
-    const term = String(rawTerm).toLowerCase().trim().replace(/^#/, '');
-    const entry = index[term];
-
-    if (!entry) return res.status(404).json({ error: 'keyword not found', term: term });
+    const slug = String(rawTerm).toLowerCase().trim().replace(/^#/, '');
+    const entry = index[slug];
+    if (!entry) return res.status(404).json({ error: 'keyword not found', term: slug });
 
     const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
 
-    const articles = shuffle(entry.ids).slice(0, limit).map(id => {
-      const row = rows[id];
+    const matched = entry.ids
+      .map(id => rows[id])
+      .filter(row => containsTerm(row, slug));
+
+    const articles = shuffle(matched).slice(0, limit).map(row => {
       const out = withMediaTypes(row);
       out.snippet = clip(row.body, 200);
       delete out.body;
@@ -710,12 +710,17 @@ app.get('/articles/discover', async function (req, res) {
       return out;
     });
 
-    return res.json({ keyword: term, total: entry.ids.length, articles: articles });
+    return res.json({ keyword: entry.name, total: matched.length, articles: articles });
   }
 
-  // MODE 2: no term  ->  keyword chips (top pool, shuffled so they vary per load)
+  // MODE 2: no term -> keyword chips
   const pool = Object.keys(index)
-    .map(term => ({ keyword: term, count: index[term].ids.length, score: index[term].score }))
+    .map(slug => ({
+      keyword: slug,
+      name: index[slug].name,
+      count: index[slug].ids.length,
+      score: index[slug].score
+    }))
     .sort((a, b) => b.score - a.score)
     .slice(0, 40);
 
